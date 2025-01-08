@@ -348,8 +348,8 @@ from assistant import (
     recognize_speech,
     analyze_sentiment,
     generate_embeddings,
-    generate_recommendations_with_llm,
-    generate_dynamic_questions_with_llm,
+    recommend_products,
+    generate_dynamic_questions,
     generate_crm_data,
     initialize_vector_db
 )
@@ -445,10 +445,10 @@ def recognize_speech_in_background(session_id):
                 print(f"Sentiment: {sentiment}, Score: {score}, Shift: {sentiment_shift}")  # Debug
 
                 # Product Recommendation with LLM
-                recommendations = generate_recommendations_with_llm(text, past_conversations)
+                recommendations = recommend_products(text, past_conversations)
 
                 # Dynamic Question Handling with LLM
-                dynamic_questions = generate_dynamic_questions_with_llm(text)
+                dynamic_questions = generate_dynamic_questions(text)
 
                 socketio.emit('analysis', {
                     'sentiment': sentiment,
@@ -501,8 +501,8 @@ def upload_audio():
 
     text = recognize_speech(file_path)
     sentiment, score = analyze_sentiment(text)
-    recommendations = generate_recommendations_with_llm(text, context_data=[])  # CRM data dynamically generated
-    dynamic_questions = generate_dynamic_questions_with_llm(text)
+    recommendations = recommend_products(text, context_data=[])  # CRM data dynamically generated
+    dynamic_questions = generate_dynamic_questions(text)
 
     return jsonify({
         'transcript': text,
