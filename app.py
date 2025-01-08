@@ -338,6 +338,7 @@
 
 
 import os
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 import sqlite3
 from flask import Flask, render_template, request, jsonify, send_file, make_response
 from flask_socketio import SocketIO, emit
@@ -420,6 +421,8 @@ def recognize_speech_in_background(session_id):
 
     with microphone as source:
         recognizer.adjust_for_ambient_noise(source)
+        print("Microphone initialized successfully")
+
         while is_listening:
             try:
                 audio = recognizer.listen(source)
@@ -538,8 +541,14 @@ def download_pdf():
     transcripts = []
     return send_file(pdf_output, as_attachment=True)
 
+# if __name__ == "__main__":
+#     initialize_database()
+#     os.makedirs("uploads", exist_ok=True)
+#     socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
+
+
 if __name__ == "__main__":
     initialize_database()
     os.makedirs("uploads", exist_ok=True)
-    socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
+    socketio.run(app, debug=True)
 

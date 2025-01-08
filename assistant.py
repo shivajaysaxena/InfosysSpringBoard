@@ -208,10 +208,14 @@
 
 
 import logging
+logging.basicConfig(level=logging.WARNING)  # Adjust as needed: INFO, ERROR
 import os
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 import faiss
 import numpy as np
-from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import pipeline
+classifier = pipeline('text-classification', model='distilbert-base-uncased-finetuned-sst-2-english', revision='714eb0f')
 from sentence_transformers import SentenceTransformer
 import speech_recognition as sr
 
@@ -224,15 +228,14 @@ sentiment_analyzer = pipeline("sentiment-analysis")
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 vector_db = None
 
-# Load Open-Source LLM (e.g., LLaMA model)
-# llm_tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.3-70B-Instruct")
-# llm_model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.3-70B-Instruct")
-from transformers import AutoTokenizer, AutoModelForCausalLM
-
+# from transformers import AutoTokenizer, AutoModelForCausalLM
 # Replace with a publicly accessible model name
-model_name = "EleutherAI/gpt-neo-2.7B"  # Example
-llm_tokenizer = AutoTokenizer.from_pretrained(model_name, token=True)
-llm_model = AutoModelForCausalLM.from_pretrained(model_name, token=True)
+# model_name = "EleutherAI/gpt-neo-2.7B"  # Example
+# llm_tokenizer = AutoTokenizer.from_pretrained(model_name, token=True)
+# llm_model = AutoModelForCausalLM.from_pretrained(model_name, token=True)
+from transformers import AutoModel, AutoTokenizer
+model = AutoModel.from_pretrained("distilbert-base-uncased-finetuned-sst-2-english", cache_dir="./models")
+tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased-finetuned-sst-2-english", cache_dir="./models")
 
 # Speech Recognition
 def recognize_speech(file_path):

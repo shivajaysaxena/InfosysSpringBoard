@@ -455,10 +455,12 @@
 
         startBtn.addEventListener('click', () => {
             socket.emit('start_recording');
+            liveTranscription.innerText = 'Listening...';
         });
 
         stopBtn.addEventListener('click', () => {
             socket.emit('stop_recording');
+            liveTranscription.innerText = 'Stopped listening.';
         });
 
         socket.on('transcript', (data) => {
