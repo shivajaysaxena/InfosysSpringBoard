@@ -140,8 +140,7 @@
 </html>  -->
 
 
-
-<!-- m3 -->
+ <!-- m3 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -200,6 +199,14 @@
     <script>
         const socket = io.connect();
 
+        socket.on('connect', () => {
+            console.log('WebSocket connected.');
+        });
+
+        socket.on('disconnect', () => {
+            console.log('WebSocket disconnected.');
+        });
+
         const startBtn = document.getElementById('start-recording');
         const stopBtn = document.getElementById('stop-recording');
         const liveTranscription = document.getElementById('live-transcription');
@@ -207,6 +214,8 @@
         const sentimentShift = document.getElementById('sentiment-shift');
         const recommendationsList = document.getElementById('recommendations');
         const dynamicQuestionsList = document.getElementById('dynamic-questions');
+        
+        
 
         startBtn.addEventListener('click', () => {
             socket.emit('start_recording');
@@ -217,14 +226,23 @@
             socket.emit('stop_recording');
             liveTranscription.innerText = 'Stopped listening.';
         });
-
+        
+        
         socket.on('transcript', (data) => {
+            console.log('Received transcript:', data);
             liveTranscription.innerText = data.text;
         });
 
+        socket.emit('test_event', { data: 'Hello' });
+
+        socket.on('response_event', (data) => {
+            console.log('Server response:', data);
+        });
+
+
         socket.on('analysis', (data) => {
             sentiment.innerText = `Sentiment: ${data.sentiment} (Score: ${data.score})`;
-            sentimentShift.innerText = data.shift || "No shift detected.";
+            sentimentShift.innerText = data.shift || "No shift detected..";
             recommendationsList.innerHTML = data.recommendations.map(item => `<li>${item}</li>`).join('');
             dynamicQuestionsList.innerHTML = data.questions.map(item => `<li>${item}</li>`).join('');
         });
@@ -268,146 +286,3 @@
     </script>
 </body>
 </html>
-
-<!-- <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Product Recommendation & Dynamic Questions</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-    <script src="https://cdn.socket.io/4.5.1/socket.io.min.js"></script>
-    <style>
-        #processing {
-            display: none;
-            font-style: italic;
-            color: #888;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Real-Time Product Recommendation</h1>
-
-        <div id="recording-section">
-            <h2>Live Speech Input</h2>
-            <button id="start-recording" class="btn">Start Recording</button>
-            <button id="stop-recording" class="btn hidden">Stop Recording</button>
-            <h3>Status:</h3>
-            <p id="status-text">Waiting to start...</p>
-            <h3>Transcription:</h3>
-            <p id="live-transcription" class="hidden">Waiting for input...</p>
-            <h3>Sentiment:</h3>
-            <p id="sentiment" class="hidden">No data yet.</p>
-            <h3>Sentiment Shift:</h3>
-            <p id="sentiment-shift" class="hidden">No shift detected.</p>
-            <h3>Product Recommendations:</h3>
-            <ul id="recommendations" class="hidden"></ul>
-            <h3>Dynamic Questions:</h3>
-            <ul id="dynamic-questions" class="hidden"></ul>
-        </div>
-
-        <hr>
-
-        <div id="upload-section">
-            <h2>Upload Audio File</h2>
-            <form id="upload-form">
-                <input type="file" id="audio-file" accept="audio/*">
-                <button type="submit" class="btn">Upload and Process</button>
-            </form>
-            <h3>Status:</h3>
-            <p id="processing">Processing audio file...</p>
-            <h3>Transcription:</h3>
-            <p id="file-transcription">Waiting for input...</p>
-            <h3>Sentiment:</h3>
-            <p id="file-sentiment">No data yet.</p>
-            <h3>Product Recommendations:</h3>
-            <ul id="file-recommendations"></ul>
-            <h3>Dynamic Questions:</h3>
-            <ul id="file-dynamic-questions"></ul>
-        </div>
-
-        <hr>
-
-        <div id="pdf-download-section">
-            <h2>Download Results</h2>
-            <button id="download-pdf" class="btn">Download PDF</button>
-        </div>
-    </div>
-
-    <script>
-        const socket = io.connect();
-
-        const startBtn = document.getElementById('start-recording');
-        const stopBtn = document.getElementById('stop-recording');
-        const statusText = document.getElementById('status-text');
-        const transcriptionDiv = document.getElementById('live-transcription');
-        const sentimentDiv = document.getElementById('sentiment');
-        const sentimentShiftDiv = document.getElementById('sentiment-shift');
-        const recommendationsList = document.getElementById('recommendations');
-        const questionsList = document.getElementById('dynamic-questions');
-
-        startBtn.addEventListener('click', () => {
-            socket.emit('start_recording');
-            startBtn.classList.add('hidden');
-            stopBtn.classList.remove('hidden');
-            statusText.textContent = "Listening...";
-            transcriptionDiv.classList.add('hidden');
-            sentimentDiv.classList.add('hidden');
-            sentimentShiftDiv.classList.add('hidden');
-            recommendationsList.classList.add('hidden');
-            questionsList.classList.add('hidden');
-        });
-
-        stopBtn.addEventListener('click', () => {
-            socket.emit('stop_recording');
-            startBtn.classList.remove('hidden');
-            stopBtn.classList.add('hidden');
-            statusText.textContent = "Stopped.";
-        });
-
-        socket.on('transcript', (data) => {
-            transcriptionDiv.classList.remove('hidden');
-            transcriptionDiv.innerText = data.text;
-        });
-
-        socket.on('analysis', (data) => {
-            sentimentDiv.classList.remove('hidden');
-            sentimentDiv.innerText = data.sentiment;
-            sentimentShiftDiv.classList.remove('hidden');
-            sentimentShiftDiv.innerText = data.shift || "No shift detected.";
-            recommendationsList.classList.remove('hidden');
-            recommendationsList.innerHTML = data.recommendations.map(item => `<li>${item}</li>`).join('');
-            questionsList.classList.remove('hidden');
-            questionsList.innerHTML = data.questions.map(item => `<li>${item}</li>`).join('');
-        });
-
-        document.getElementById('upload-form').addEventListener('submit', (e) => {
-            e.preventDefault();
-            const formData = new FormData();
-            formData.append('audio', document.getElementById('audio-file').files[0]);
-
-            document.getElementById('processing').style.display = "block";
-
-            fetch('/upload', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                document.getElementById('processing').style.display = "none";
-                document.getElementById('file-transcription').innerText = data.transcript;
-                document.getElementById('file-sentiment').innerText = data.sentiment;
-                document.getElementById('file-recommendations').innerHTML = data.recommendations.map(item => `<li>${item}</li>`).join('');
-                document.getElementById('file-dynamic-questions').innerHTML = data.questions.map(item => `<li>${item}</li>`).join('');
-            });
-        });
-
-        document.getElementById('download-pdf').addEventListener('click', () => {
-            window.location.href = '/download_pdf';
-        });
-    </script>
-</body>
-</html> -->
-
-
