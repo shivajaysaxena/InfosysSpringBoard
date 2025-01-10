@@ -350,16 +350,6 @@ def generate_crm_data(conversations, phone_dataset):
 
 
 def process_object_query(query: str, phone_dataset: pd.DataFrame) -> List[Dict[str, str]]:
-    """
-    Process object-based queries to find relevant phones based on use case.
-    
-    Args:
-        query (str): Search query from user
-        phone_dataset (pd.DataFrame): Dataset containing phone information
-    
-    Returns:
-        List[Dict[str, str]]: List of relevant phones with their details
-    """
     # Define category keywords
     categories = {
         'gaming': ['gaming', 'game', 'pubg', 'fps', 'performance', 'powerful'],
