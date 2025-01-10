@@ -203,7 +203,7 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 import faiss
 import google.generativeai as genai
-from typing import List, Optional
+from typing import List, Optional, Dict, Tuple
 import pandas as pd
 
 # Load models
@@ -349,3 +349,130 @@ def generate_crm_data(conversations, phone_dataset):
     return crm_data
 
 
+def process_object_query(query: str, phone_dataset: pd.DataFrame) -> List[Dict[str, str]]:
+    """
+    Process object-based queries to find relevant phones based on use case.
+    
+    Args:
+        query (str): Search query from user
+        phone_dataset (pd.DataFrame): Dataset containing phone information
+    
+    Returns:
+        List[Dict[str, str]]: List of relevant phones with their details
+    """
+    # Define category keywords
+    categories = {
+        'gaming': ['gaming', 'game', 'pubg', 'fps', 'performance', 'powerful'],
+        'camera': ['camera', 'photo', 'photography', 'selfie', 'videography'],
+        'business': ['business', 'work', 'professional', 'productivity'],
+        'display': ['display', 'screen', 'view', 'watching', 'multimedia'],
+        'battery': ['battery', 'long lasting', 'endurance', 'backup']
+    }
+    
+    # Identify category from query
+    query_lower = query.lower()
+    matched_categories = []
+    
+    for category, keywords in categories.items():
+        if any(keyword in query_lower for keyword in keywords):
+            matched_categories.append(category)
+    
+    # Also check if any keywords from the dataset match
+    keyword_matches = phone_dataset[phone_dataset['Keywords'].str.contains(query_lower, case=False, na=False)]
+    
+    results = []
+    if matched_categories:
+        for category in matched_categories:
+            filtered_phones = filter_phones_by_category(category, phone_dataset)
+            results.extend(filtered_phones)
+    elif not keyword_matches.empty:
+        # If we have keyword matches but no category matches
+        results = [create_phone_dict(row) for _, row in keyword_matches.iterrows()]
+    else:
+        # If no specific category or keyword is matched, use semantic search
+        results = semantic_phone_search(query, phone_dataset)
+    
+    # Remove duplicates based on phone name
+    unique_results = []
+    seen_phones = set()
+    for phone in results:
+        if phone['name'] not in seen_phones:
+            unique_results.append(phone)
+            seen_phones.add(phone['name'])
+    
+    return unique_results[:5]  # Return top 5 unique results
+
+def filter_phones_by_category(category: str, phone_dataset: pd.DataFrame) -> List[Dict[str, str]]:
+    """
+    Filter phones based on category-specific criteria.
+    """
+    def extract_number(value):
+        try:
+            return pd.to_numeric(''.join(filter(str.isdigit, str(value))))
+        except:
+            return 0
+
+    criteria = {
+        'gaming': lambda df: df[
+            (df['RAM'].apply(extract_number) >= 6) &  # At least 6GB RAM
+            (df['Processor'].str.contains('Snapdragon|Dimensity|Gaming', case=False, na=False))
+        ],
+        'camera': lambda df: df[
+            (df['Rear Camera'].str.contains('108MP|64MP|48MP', case=False, na=False)) |
+            (df['Front Camera'].str.contains('32MP|20MP', case=False, na=False))
+        ],
+        'business': lambda df: df[
+            (df['RAM'].apply(extract_number) >= 6) &
+            (df['Storage'].apply(extract_number) >= 128)
+        ],
+        'display': lambda df: df[
+            df['Resolution'].str.contains('2K|1440|AMOLED|120Hz', case=False, na=False)
+        ],
+        'battery': lambda df: df[
+            df['Battery Capacity'].apply(extract_number) >= 5000
+        ]
+    }
+    
+    try:
+        filtered_df = criteria.get(category, lambda df: df)(phone_dataset)
+        return [create_phone_dict(row) for _, row in filtered_df.iterrows()]
+    except Exception as e:
+        print(f"Error filtering phones for category {category}: {e}")
+        return []
+
+def create_phone_dict(row: pd.Series) -> Dict[str, str]:
+    """
+    Create a standardized dictionary from a phone dataset row.
+    """
+    return {
+        'name': str(row['Phone Name']),
+        'display': str(row['Display']),
+        'camera': f"Front: {str(row['Front Camera'])}, Rear: {str(row['Rear Camera'])}",
+        'specs': f"RAM: {str(row['RAM'])}, Storage: {str(row['Storage'])}, Battery: {str(row['Battery Capacity'])}, Processor: {str(row['Processor'])}",
+        'os': str(row['OS'])
+    }
+
+def semantic_phone_search(query: str, phone_dataset: pd.DataFrame) -> List[Dict[str, str]]:
+    """
+    Perform semantic search on phone dataset using query embeddings.
+    """
+    try:
+        # Create query embedding
+        query_embedding = embedding_model.encode(query)
+        
+        # Create embeddings for phone descriptions
+        phone_descriptions = phone_dataset.apply(
+            lambda row: f"{row['Phone Name']} {row['Keywords']} {row['Display']} {row['Processor']}", 
+            axis=1
+        ).tolist()
+        
+        phone_embeddings = np.array([embedding_model.encode(desc) for desc in phone_descriptions])
+        
+        # Calculate similarities
+        similarities = np.dot(phone_embeddings, query_embedding)
+        top_indices = np.argsort(similarities)[-5:][::-1]  # Get top 5 matches
+        
+        return [create_phone_dict(phone_dataset.iloc[idx]) for idx in top_indices]
+    except Exception as e:
+        print(f"Error in semantic search: {e}")
+        return []

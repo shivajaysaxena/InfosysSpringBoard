@@ -639,7 +639,8 @@ from assistant import (
     generate_dynamic_questions,
     generate_crm_data,
     initialize_vector_db,
-    load_phone_dataset
+    load_phone_dataset,
+    process_object_query
 )
 from fpdf import FPDF
 import time
@@ -706,7 +707,7 @@ def generate_pdf(transcripts):
 phone_dataset = load_phone_dataset("phone_comparison.csv")
 
 def main():
-    st.title("Speech Recognition and Sentiment Analysis")
+    st.title("Speech Recognition, Sentiment Analysis, and Object Handling")
 
     # Initialize session
     session_id = st.session_state.get("session_id", str(datetime.now().timestamp()))
@@ -727,7 +728,7 @@ def main():
 
 
     # Sidebar for file upload or recording
-    option = st.sidebar.radio("Choose an action", ["Live Recording", "Upload Audio File"])
+    option = st.sidebar.radio("Choose an action", ["Live Recording", "Upload Audio File", "Search Query"])
 
     transcripts = []
 
@@ -866,6 +867,23 @@ def main():
                 "recommendations": recommendations,
                 "questions": dynamic_questions,
             })
+    
+    elif option == "Search Query":
+        st.sidebar.header("Phone Search")
+        search_query = st.sidebar.text_input("Search for phones", "")
+        if search_query:
+            phone_results = process_object_query(search_query, phone_dataset)
+            
+            if phone_results:
+                st.sidebar.subheader("Search Results")
+                for phone in phone_results:
+                    with st.sidebar.expander(phone['name']):
+                        st.write("📱 Display:", phone['display'])
+                        st.write("📸 Camera:", phone['camera'])
+                        st.write("⚙️ Specifications:", phone['specs'])
+                        st.write("🔄 OS:", phone['os'])
+            else:
+                st.sidebar.warning("No matching phones found.")
 
     # Make sure PDF is available for download after recording is stopped
     if transcripts and not st.session_state.get("recording_active", False):
