@@ -639,6 +639,7 @@ from assistant import (
     generate_dynamic_questions,
     generate_crm_data,
     initialize_vector_db,
+    load_phone_dataset
 )
 from fpdf import FPDF
 import time
@@ -701,6 +702,9 @@ def generate_pdf(transcripts):
     return pdf_output
 
 # Main Streamlit app
+# Load the phone dataset globally
+phone_dataset = load_phone_dataset("phone_comparison.csv")
+
 def main():
     st.title("Speech Recognition and Sentiment Analysis")
 
@@ -708,11 +712,19 @@ def main():
     session_id = st.session_state.get("session_id", str(datetime.now().timestamp()))
     st.session_state["session_id"] = session_id
 
-    # Initialize CRM data dynamically
+    # Fetch past conversations
     past_conversations = fetch_past_conversations(session_id)
     if not past_conversations:
         past_conversations = ["Looking for a smartphone", "Interested in laptops"]
-    initialize_vector_db(generate_crm_data(past_conversations))
+
+    # Generate CRM data dynamically from the dataset
+    crm_data = generate_crm_data(past_conversations, phone_dataset)
+    print("Generated CRM Data:", crm_data)
+    if crm_data:
+        initialize_vector_db(crm_data)
+    else:
+        print("No CRM data generated. Skipping vector database initialization.")
+
 
     # Sidebar for file upload or recording
     option = st.sidebar.radio("Choose an action", ["Live Recording", "Upload Audio File"])
@@ -777,7 +789,7 @@ def main():
                                 # Update previous sentiment for the next comparison
                                 st.session_state["previous_sentiment"] = sentiment
 
-                                crm_data = generate_crm_data(fetch_past_conversations(session_id))
+                                crm_data = generate_crm_data(fetch_past_conversations(session_id), phone_dataset)
                                 recommendations = recommend_products(crm_data, text)
                                 dynamic_questions = generate_dynamic_questions(text, api_key)
 
@@ -834,7 +846,7 @@ def main():
                 f.write(uploaded_file.read())
             text = recognize_speech(file_path)
             sentiment, score = analyze_sentiment(text)
-            crm_data = generate_crm_data(past_conversations)
+            crm_data = generate_crm_data(past_conversations, phone_dataset)
             recommendations = recommend_products(crm_data, text)
             dynamic_questions = generate_dynamic_questions(text, api_key)
 
