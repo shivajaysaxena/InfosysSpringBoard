@@ -98,7 +98,7 @@ def main():
 
     # Generate CRM data dynamically from the dataset
     crm_data = generate_crm_data(past_conversations, phone_dataset)
-    print("Generated CRM Data:", crm_data)
+    # print("Generated CRM Data:", crm_data)
     if crm_data:
         initialize_vector_db(crm_data)
     else:

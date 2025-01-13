@@ -38,14 +38,14 @@ def initialize_vector_db(data):
     # Initialize the Faiss vector database with the correct dimensionality
     vector_db = faiss.IndexFlatL2(embeddings.shape[1])  # Number of dimensions of embeddings
     vector_db.add(embeddings)
-    print(f"Vector database initialized with {len(data)} CRM entries.") 
+    # print(f"Vector database initialized with {len(data)} CRM entries.") 
 
 
 def generate_embeddings(text):
     return embedding_model.encode(text)
 
 def recommend_products(crm_data, text):
-    print("Processing conversation:", text)
+    # print("Processing conversation:", text)
     
     if not crm_data or vector_db is None:
         return ["No recommendations available."]
