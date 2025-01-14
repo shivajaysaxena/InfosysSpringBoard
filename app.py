@@ -273,7 +273,7 @@ def main():
                 f.write(uploaded_file.read())
             text = recognize_speech(file_path)
             sentiment, score = analyze_sentiment(text)
-            crm_data = generate_crm_data(past_conversations, phone_dataset)
+            crm_data = generate_crm_data(conversations, phone_dataset)
             recommendations = recommend_products(crm_data, text)
             dynamic_questions = generate_dynamic_questions(text, api_key)
 
