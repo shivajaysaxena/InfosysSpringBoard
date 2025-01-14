@@ -53,10 +53,29 @@ def save_conversation(session_id, text):
 def fetch_past_conversations(session_id):
     conn = sqlite3.connect(database_path)
     cursor = conn.cursor()
-    cursor.execute("SELECT text FROM conversations WHERE session_id = ?", (session_id,))
+    cursor.execute("""
+        SELECT text, timestamp 
+        FROM conversations 
+        WHERE session_id = ? 
+        ORDER BY timestamp DESC
+    """, (session_id,))
     rows = cursor.fetchall()
     conn.close()
-    return [row[0] for row in rows]
+    return rows
+
+# Add new function to get conversation details
+def get_conversation_details(text):
+    sentiment, score = analyze_sentiment(text)
+    current_crm_data = generate_crm_data([text], phone_dataset)
+    initialize_vector_db(current_crm_data)
+    recommendations = recommend_products(current_crm_data, text)
+    dynamic_questions = generate_dynamic_questions(text, api_key)
+    return {
+        'sentiment': sentiment,
+        'score': score,
+        'recommendations': recommendations,
+        'questions': dynamic_questions
+    }
 
 # Generate PDF
 def generate_pdf(transcripts):
@@ -85,32 +104,58 @@ def generate_pdf(transcripts):
 phone_dataset = load_phone_dataset("phone_comparison.csv")
 
 def main():
+    # Initialize transcripts list
+    if 'transcripts' not in st.session_state:
+        st.session_state.transcripts = []
+
     st.title("Speech Recognition, Sentiment Analysis, and Object Handling")
 
     # Initialize session
     session_id = st.session_state.get("session_id", str(datetime.now().timestamp()))
     st.session_state["session_id"] = session_id
 
-    # Fetch past conversations
-    past_conversations = fetch_past_conversations(session_id)
-    if not past_conversations:
-        past_conversations = ["Looking for a smartphone", "Interested in laptops"]
+    # Sidebar options including new Dashboard
+    option = st.sidebar.radio(
+        "Choose an action", 
+        ["Dashboard", "Live Recording", "Upload Audio File", "Search Query"]
+    )
 
-    # Generate CRM data dynamically from the dataset
-    crm_data = generate_crm_data(past_conversations, phone_dataset)
-    # print("Generated CRM Data:", crm_data)
-    if crm_data:
-        initialize_vector_db(crm_data)
-    else:
-        print("No CRM data generated. Skipping vector database initialization.")
+    if option == "Dashboard":
+        st.header("Conversation History Dashboard")
+        
+        # Fetch all past conversations with timestamps
+        conversations = fetch_past_conversations(session_id)
+        
+        if not conversations:
+            st.info("No conversation history available.")
+        else:
+            for conv_text, timestamp in conversations:
+                # Create an expander for each conversation
+                with st.expander(f"Conversation from {timestamp}"):
+                    st.text("Transcript:")
+                    st.write(conv_text)
+                    
+                    # Get or compute conversation details
+                    details = get_conversation_details(conv_text)
+                    
+                    # Display details in organized sections
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.subheader("Sentiment Analysis")
+                        st.write(f"Sentiment: {details['sentiment']}")
+                        st.write(f"Score: {round(details['score'], 2)}")
+                    
+                    with col2:
+                        st.subheader("Recommendations")
+                        for rec in details['recommendations']:
+                            st.write(f"• {rec}")
+                    
+                    st.subheader("Generated Questions")
+                    for i, question in enumerate(details['questions'], 1):
+                        st.write(f"{i}. {question}")
 
-
-    # Sidebar for file upload or recording
-    option = st.sidebar.radio("Choose an action", ["Live Recording", "Upload Audio File", "Search Query"])
-
-    transcripts = []
-
-    if option == "Live Recording":
+    elif option == "Live Recording":
         st.header("Live Recording")
 
         recognizer = sr.Recognizer()
@@ -189,7 +234,7 @@ def main():
                                 st.write(f"Sentiment Shift: {sentiment_shift}")
 
                                 # Append to transcripts list for PDF generation
-                                transcripts.append({
+                                st.session_state.transcripts.append({
                                     "text": text,
                                     "sentiment": sentiment,
                                     "score": score,
@@ -212,9 +257,9 @@ def main():
                     print("Error: Speech recognition service unavailable.")
 
         # Show download button only after recording stops and transcripts are available
-        if not st.session_state.get("recording_active", False) and transcripts:
+        if not st.session_state.get("recording_active", False) and st.session_state.transcripts:
             # Generate the PDF report
-            pdf_path = generate_pdf(transcripts)
+            pdf_path = generate_pdf(st.session_state.transcripts)
             with open(pdf_path, "rb") as pdf_file:
                 st.download_button(label="Download Analysis Report (PDF)", data=pdf_file, file_name="analysis_report.pdf")
 
@@ -240,7 +285,7 @@ def main():
             st.write("Dynamic Questions:")
             st.write(dynamic_questions)
 
-            transcripts.append({
+            st.session_state.transcripts.append({
                 "text": text,
                 "sentiment": sentiment,
                 "score": score,
@@ -267,8 +312,8 @@ def main():
                 st.sidebar.warning("No matching phones found.")
 
     # Make sure PDF is available for download after recording is stopped
-    if transcripts and not st.session_state.get("recording_active", False):
-        pdf_path = generate_pdf(transcripts)
+    if st.session_state.transcripts and not st.session_state.get("recording_active", False):
+        pdf_path = generate_pdf(st.session_state.transcripts)
         with open(pdf_path, "rb") as pdf_file:
             st.download_button(label="Download Analysis Report (PDF)", data=pdf_file, file_name="analysis_report.pdf")
 
