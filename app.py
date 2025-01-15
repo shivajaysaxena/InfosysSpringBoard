@@ -22,6 +22,12 @@ from assistant import (
 )
 from fpdf import FPDF
 import time
+import pandas as pd
+from collections import Counter
+import plotly.express as px
+import plotly.graph_objects as go
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
 
 # Initialize database path
 database_path = "conversations.db"
@@ -99,6 +105,36 @@ def generate_pdf(transcripts):
     pdf.output(pdf_output)
     return pdf_output
 
+# Add new analysis functions
+def get_conversation_summary(conversations):
+    all_text = " ".join([conv[0] for conv in conversations])
+    words = all_text.lower().split()
+    word_freq = Counter(words)
+    # Remove common words
+    common_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'is', 'are', 'was', 'were'}
+    word_freq = {k: v for k, v in word_freq.items() if k not in common_words and len(k) > 2}
+    return word_freq
+
+def get_sentiment_metrics(conversations):
+    sentiments = []
+    for conv_text, _ in conversations:
+        sentiment, score = analyze_sentiment(conv_text)
+        sentiments.append({
+            'sentiment': sentiment,
+            'score': score,
+            'text': conv_text,
+            'timestamp': _
+        })
+    return sentiments
+
+def get_product_recommendations_summary(conversations):
+    all_recommendations = []
+    for conv_text, _ in conversations:
+        current_crm_data = generate_crm_data([conv_text], phone_dataset)
+        recommendations = recommend_products(current_crm_data, conv_text)
+        all_recommendations.extend(recommendations)
+    return Counter(all_recommendations)
+
 # Main Streamlit app
 # Load the phone dataset globally
 phone_dataset = load_phone_dataset("phone_comparison.csv")
@@ -123,61 +159,128 @@ def main():
     )
 
     if option == "Dashboard":
-        st.header("Conversation History Dashboard")
+        st.header("Conversation Analysis Dashboard")
         
-        # Fetch all past conversations with timestamps
+        # Create tabs for Summary and Detailed View
+        summary_tab, detailed_tab = st.tabs(["Conversation Summary", "Detailed Call Reports"])
+        
         conversations = fetch_past_conversations(session_id)
         
         if not conversations:
             st.info("No conversation history available.")
         else:
-            all_conversation_details = []
-            for conv_text, timestamp in conversations:
-                # Create an expander for each conversation
-                with st.expander(f"Conversation from {timestamp}"):
-                    st.text("Transcript:")
-                    st.write(conv_text)
+            with summary_tab:
+                # Layout with columns
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader("Conversation Overview")
+                    total_conversations = len(conversations)
+                    st.metric("Total Interactions", total_conversations)
                     
-                    # Get or compute conversation details
-                    details = get_conversation_details(conv_text)
+                    # Get sentiment metrics
+                    sentiments = get_sentiment_metrics(conversations)
+                    avg_sentiment_score = sum(s['score'] for s in sentiments) / len(sentiments)
+                    st.metric("Average Sentiment Score", f"{avg_sentiment_score:.2f}")
+                
+                with col2:
+                    st.subheader("Most Frequent Terms")
+                    word_freq = get_conversation_summary(conversations)
+                    top_words = dict(sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:5])
                     
-                    # Store details for PDF
-                    all_conversation_details.append({
-                        "text": conv_text,
-                        "sentiment": details['sentiment'],
-                        "score": details['score'],
-                        "shift": "N/A",  # Not tracking shifts in dashboard
-                        "recommendations": details['recommendations'],
-                        "questions": details['questions']
-                    })
-                    
-                    # Display details in organized sections
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.subheader("Sentiment Analysis")
-                        st.write(f"Sentiment: {details['sentiment']}")
-                        st.write(f"Score: {round(details['score'], 2)}")
-                    
-                    with col2:
-                        st.subheader("Recommendations")
-                        for rec in details['recommendations']:
-                            st.write(f"• {rec}")
-                    
-                    st.subheader("Generated Questions")
-                    for i, question in enumerate(details['questions'], 1):
-                        st.write(f"{i}. {question}")
-
-            # Add PDF download button only in dashboard with unique key
-            if all_conversation_details:
-                pdf_path = generate_pdf(all_conversation_details)
-                with open(pdf_path, "rb") as pdf_file:
-                    st.download_button(
-                        label="Download Complete Conversation History (PDF)",
-                        data=pdf_file,
-                        file_name="conversation_history.pdf",
-                        key="dashboard_pdf_download"
+                    # Create bar chart for word frequency
+                    fig = px.bar(
+                        x=list(top_words.keys()),
+                        y=list(top_words.values()),
+                        title="Top 5 Most Frequent Terms"
                     )
+                    st.plotly_chart(fig)
+                
+                # Sentiment Timeline
+                st.subheader("Sentiment Timeline")
+                sentiment_df = pd.DataFrame(sentiments)
+                fig = px.line(
+                    sentiment_df,
+                    x='timestamp',
+                    y='score',
+                    title="Sentiment Score Timeline",
+                    labels={'score': 'Sentiment Score', 'timestamp': 'Time'}
+                )
+                st.plotly_chart(fig)
+                
+                # Product Recommendations Summary
+                st.subheader("Top Recommended Products")
+                product_freq = get_product_recommendations_summary(conversations)
+                top_products = dict(sorted(product_freq.items(), key=lambda x: x[1], reverse=True)[:5])
+                
+                # Create horizontal bar chart for product recommendations
+                fig = go.Figure(go.Bar(
+                    x=list(top_products.values()),
+                    y=list(top_products.keys()),
+                    orientation='h'
+                ))
+                fig.update_layout(title="Most Recommended Products")
+                st.plotly_chart(fig)
+                
+                # Word Cloud Visualization
+                st.subheader("Conversation Word Cloud")
+                wordcloud = WordCloud(background_color='white').generate_from_frequencies(word_freq)
+                fig, ax = plt.subplots()
+                ax.imshow(wordcloud, interpolation='bilinear')
+                ax.axis('off')
+                st.pyplot(fig)
+            
+            with detailed_tab:
+                # Existing detailed conversation view
+                st.subheader("Detailed Conversation History")
+                all_conversation_details = []
+                
+                for conv_text, timestamp in conversations:
+                    # Create an expander for each conversation
+                    with st.expander(f"Conversation from {timestamp}"):
+                        st.text("Transcript:")
+                        st.write(conv_text)
+                        
+                        # Get or compute conversation details
+                        details = get_conversation_details(conv_text)
+                        
+                        # Store details for PDF
+                        all_conversation_details.append({
+                            "text": conv_text,
+                            "sentiment": details['sentiment'],
+                            "score": details['score'],
+                            "shift": "N/A",  # Not tracking shifts in dashboard
+                            "recommendations": details['recommendations'],
+                            "questions": details['questions']
+                        })
+                        
+                        # Display details in organized sections
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.subheader("Sentiment Analysis")
+                            st.write(f"Sentiment: {details['sentiment']}")
+                            st.write(f"Score: {round(details['score'], 2)}")
+                        
+                        with col2:
+                            st.subheader("Recommendations")
+                            for rec in details['recommendations']:
+                                st.write(f"• {rec}")
+                        
+                        st.subheader("Generated Questions")
+                        for i, question in enumerate(details['questions'], 1):
+                            st.write(f"{i}. {question}")
+
+                # Add PDF download button only in dashboard with unique key
+                if all_conversation_details:
+                    pdf_path = generate_pdf(all_conversation_details)
+                    with open(pdf_path, "rb") as pdf_file:
+                        st.download_button(
+                            label="Download Complete Conversation History (PDF)",
+                            data=pdf_file,
+                            file_name="conversation_history.pdf",
+                            key="dashboard_pdf_download"
+                        )
 
     elif option == "Live Recording":
         st.header("Live Recording")
