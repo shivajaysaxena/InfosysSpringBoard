@@ -104,9 +104,11 @@ def generate_pdf(transcripts):
 phone_dataset = load_phone_dataset("phone_comparison.csv")
 
 def main():
-    # Initialize transcripts list
+    # Initialize session state variables
     if 'transcripts' not in st.session_state:
         st.session_state.transcripts = []
+    if 'dashboard_pdf_ready' not in st.session_state:
+        st.session_state.dashboard_pdf_ready = False
 
     st.title("Speech Recognition, Sentiment Analysis, and Object Handling")
 
@@ -129,6 +131,7 @@ def main():
         if not conversations:
             st.info("No conversation history available.")
         else:
+            all_conversation_details = []
             for conv_text, timestamp in conversations:
                 # Create an expander for each conversation
                 with st.expander(f"Conversation from {timestamp}"):
@@ -137,6 +140,16 @@ def main():
                     
                     # Get or compute conversation details
                     details = get_conversation_details(conv_text)
+                    
+                    # Store details for PDF
+                    all_conversation_details.append({
+                        "text": conv_text,
+                        "sentiment": details['sentiment'],
+                        "score": details['score'],
+                        "shift": "N/A",  # Not tracking shifts in dashboard
+                        "recommendations": details['recommendations'],
+                        "questions": details['questions']
+                    })
                     
                     # Display details in organized sections
                     col1, col2 = st.columns(2)
@@ -154,6 +167,17 @@ def main():
                     st.subheader("Generated Questions")
                     for i, question in enumerate(details['questions'], 1):
                         st.write(f"{i}. {question}")
+
+            # Add PDF download button only in dashboard with unique key
+            if all_conversation_details:
+                pdf_path = generate_pdf(all_conversation_details)
+                with open(pdf_path, "rb") as pdf_file:
+                    st.download_button(
+                        label="Download Complete Conversation History (PDF)",
+                        data=pdf_file,
+                        file_name="conversation_history.pdf",
+                        key="dashboard_pdf_download"
+                    )
 
     elif option == "Live Recording":
         st.header("Live Recording")
@@ -256,13 +280,6 @@ def main():
                     st.error("Speech recognition service unavailable.")
                     print("Error: Speech recognition service unavailable.")
 
-        # Show download button only after recording stops and transcripts are available
-        if not st.session_state.get("recording_active", False) and st.session_state.transcripts:
-            # Generate the PDF report
-            pdf_path = generate_pdf(st.session_state.transcripts)
-            with open(pdf_path, "rb") as pdf_file:
-                st.download_button(label="Download Analysis Report (PDF)", data=pdf_file, file_name="analysis_report.pdf")
-
     elif option == "Upload Audio File":
         st.header("Upload Audio File")
         uploaded_file = st.file_uploader("Upload an audio file", type=["wav", "mp3"])
@@ -310,12 +327,6 @@ def main():
                         st.write("🔄 OS:", phone['os'])
             else:
                 st.sidebar.warning("No matching phones found.")
-
-    # Make sure PDF is available for download after recording is stopped
-    if st.session_state.transcripts and not st.session_state.get("recording_active", False):
-        pdf_path = generate_pdf(st.session_state.transcripts)
-        with open(pdf_path, "rb") as pdf_file:
-            st.download_button(label="Download Analysis Report (PDF)", data=pdf_file, file_name="analysis_report.pdf")
 
 if __name__ == "__main__":
     initialize_database()
