@@ -11,6 +11,7 @@ import pandas as pd
 sentiment_analyzer = pipeline("sentiment-analysis")
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 vector_db = None
+spare_parts_dataset = None
 
 def recognize_speech(file_path):
     recognizer = sr.Recognizer()
@@ -45,29 +46,36 @@ def generate_embeddings(text):
     return embedding_model.encode(text)
 
 def recommend_products(crm_data, text):
-    # print("Processing conversation:", text)
+    # First check if this is a troubleshooting or spare parts query
+    if is_troubleshooting_query(text):
+        return get_spare_part_recommendations(text)
     
+    # If query mentions "affordable" or similar terms, filter by price range
+    affordable_terms = ['affordable', 'cheap', 'budget', 'low price', 'inexpensive']
+    if any(term in text.lower() for term in affordable_terms):
+        return recommend_affordable_phones(text)
+    
+    # Original recommendation logic for general product queries
     if not crm_data or vector_db is None:
         return ["No recommendations available."]
     
-    # Create an entry for the current conversation only
-    current_crm_entry = {"text": text}
-    
-    # Embed the current conversation
     query_embedding = np.array([generate_embeddings(text)]).astype(np.float32)
-    
-    # Perform the search using Faiss
-    k = min(5, len(crm_data))  # Get top 5 or less if not enough data
+    k = min(5, len(crm_data))
     distances, indices = vector_db.search(query_embedding, k)
-    
-    # Get recommended products based on the indices
     recommendations = [crm_data[i]["product"] for i in indices[0] if i < len(crm_data)]
     
-    if not recommendations:
-        return ["No recommendations available."]
-    
-    return list(dict.fromkeys(recommendations))  # Remove duplicates while preserving order
+    return list(dict.fromkeys(recommendations)) if recommendations else ["No recommendations available."]
 
+def recommend_affordable_phones(text):
+    """Recommend phones based on affordability criteria"""
+    affordable_phones = [
+        "Google Pixel 9",
+        "Nothing 2",
+        "Poco F6 Pro",
+        "Redmi K70 Pro",
+        "Realme GT Neo 6"
+    ]
+    return affordable_phones
 
 def generate_dynamic_questions(text: str, api_key: str) -> List[str]:
     """
@@ -129,13 +137,23 @@ def analyze_sentiment(text):
     except Exception as e:
         return f"Sentiment analysis failed: {e}", 0.0
 
+def load_datasets(phone_path="phone_comparison.csv", parts_path="spare_parts.csv"):
+    global spare_parts_dataset
+    try:
+        phone_dataset = pd.read_csv(phone_path)
+        spare_parts_dataset = pd.read_csv(parts_path)
+        print("Datasets loaded successfully")
+        return phone_dataset
+    except Exception as e:
+        print(f"Error loading datasets: {e}")
+        return pd.DataFrame()  # Return empty DataFrame on error
+
 def load_phone_dataset(file_path="phone_comparison.csv"):
     try:
-        phones = pd.read_csv(file_path)
-        return phones
+        return pd.read_csv(file_path)
     except Exception as e:
         print(f"Error loading phone dataset: {e}")
-        return None
+        return pd.DataFrame()  # Return empty DataFrame on error
 
 # Generate CRM data dynamically based on conversations and phone dataset
 def generate_crm_data(conversations, phone_dataset):
@@ -155,6 +173,10 @@ def generate_crm_data(conversations, phone_dataset):
 
 
 def process_object_query(query: str, phone_dataset: pd.DataFrame) -> List[Dict[str, str]]:
+    # First check if it's a troubleshooting query
+    if is_troubleshooting_query(query):
+        return get_spare_part_recommendations(query)
+    
     # Define category keywords
     categories = {
         'gaming': ['gaming', 'game', 'pubg', 'fps', 'performance', 'powerful'],
@@ -196,6 +218,36 @@ def process_object_query(query: str, phone_dataset: pd.DataFrame) -> List[Dict[s
             seen_phones.add(phone['name'])
     
     return unique_results[:5]  # Return top 5 unique results
+
+def is_troubleshooting_query(query: str) -> bool:
+    troubleshooting_indicators = [
+        'issue', 'problem', 'broken', 'not working', 'repair',
+        'replace', 'fix', 'damaged', 'trouble', 'help'
+    ]
+    return any(indicator in query.lower() for indicator in troubleshooting_indicators)
+
+def get_spare_part_recommendations(query: str) -> List[str]:
+    """Get spare part recommendations for troubleshooting queries"""
+    if spare_parts_dataset is None:
+        return ["Spare parts database not available"]
+    
+    matched_parts = []
+    query_lower = query.lower()
+    
+    # Extract brand name from query if present
+    brands = ['samsung', 'apple', 'google', 'oneplus', 'xiaomi']
+    brand = next((b for b in brands if b in query_lower), None)
+    
+    for _, part in spare_parts_dataset.iterrows():
+        keywords = str(part['Keywords']).lower().split(',')
+        compatible = str(part['Compatible Models']).lower()
+        
+        # Match both keywords and brand if specified
+        if (any(keyword.strip() in query_lower for keyword in keywords) and 
+            (not brand or brand in compatible)):
+            matched_parts.append(f"{part['Part Name']} ({part['Price Range']}) - {part['Availability']}")
+    
+    return matched_parts[:5] if matched_parts else ["No specific spare parts found. Please visit a service center."]
 
 def filter_phones_by_category(category: str, phone_dataset: pd.DataFrame) -> List[Dict[str, str]]:
     """

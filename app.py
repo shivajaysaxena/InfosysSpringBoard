@@ -415,21 +415,29 @@ def main():
             })
     
     elif option == "Search Query":
-        st.sidebar.header("Phone Search")
-        search_query = st.sidebar.text_input("Search for phones", "")
+        st.sidebar.header("Product & Support Search")
+        search_query = st.sidebar.text_input("Search for phones or describe issues", "")
         if search_query:
-            phone_results = process_object_query(search_query, phone_dataset)
+            results = process_object_query(search_query, phone_dataset)
             
-            if phone_results:
+            if results:
                 st.sidebar.subheader("Search Results")
-                for phone in phone_results:
-                    with st.sidebar.expander(phone['name']):
-                        st.write("📱 Display:", phone['display'])
-                        st.write("📸 Camera:", phone['camera'])
-                        st.write("⚙️ Specifications:", phone['specs'])
-                        st.write("🔄 OS:", phone['os'])
+                for result in results:
+                    if 'display' in result:  # Phone result
+                        with st.sidebar.expander(result['name']):
+                            st.write("📱 Display:", result['display'])
+                            st.write("📸 Camera:", result['camera'])
+                            st.write("⚙️ Specifications:", result['specs'])
+                            st.write("🔄 OS:", result['os'])
+                    else:  # Spare part result
+                        with st.sidebar.expander(f"🔧 {result['name']}"):
+                            st.write("🛠️ Type:", result['type'])
+                            st.write("📱 Compatible with:", result['compatible'])
+                            st.write("💰 Price Range:", result['price'])
+                            st.write("✅ Availability:", result['availability'])
+                            st.write("ℹ️ ", result['message'])
             else:
-                st.sidebar.warning("No matching phones found.")
+                st.sidebar.warning("No matching results found.")
 
 if __name__ == "__main__":
     initialize_database()
