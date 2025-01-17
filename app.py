@@ -18,7 +18,7 @@ from assistant import (
     generate_crm_data,
     initialize_vector_db,
     load_phone_dataset,
-    process_object_query
+    process_object_query,
 )
 from fpdf import FPDF
 import time
@@ -28,6 +28,19 @@ import plotly.express as px
 import plotly.graph_objects as go
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
+
+# Move imports to top
+from assistant import initialize_assistant
+
+# After environment variables are loaded
+api_key = os.getenv('API_KEY')
+
+# Initialize assistant before using any functionality
+success = initialize_assistant(api_key, "phone_comparison.csv", "spare_parts.csv")
+if not success:
+    st.error("Failed to initialize assistant. Please check your datasets and API key.")
+    st.stop()
+print("Assistant initialized successfully")
 
 # Initialize database path
 database_path = "conversations.db"

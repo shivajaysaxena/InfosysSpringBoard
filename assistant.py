@@ -7,11 +7,13 @@ import google.generativeai as genai
 from typing import List, Optional, Dict, Tuple
 import pandas as pd
 
-# Load models
+# Global variables - All global variables must be declared at the top
+api_key = None
+phone_dataset = None
+spare_parts_dataset = None
 sentiment_analyzer = pipeline("sentiment-analysis")
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 vector_db = None
-spare_parts_dataset = None
 
 def recognize_speech(file_path):
     recognizer = sr.Recognizer()
@@ -46,14 +48,21 @@ def generate_embeddings(text):
     return embedding_model.encode(text)
 
 def recommend_products(crm_data, text):
-    # First check if this is a troubleshooting or spare parts query
-    if is_troubleshooting_query(text):
-        return get_spare_part_recommendations(text)
+    # Check for foldable-specific queries
+    if 'foldable' in text.lower():
+        return recommend_foldable_phones()
     
-    # If query mentions "affordable" or similar terms, filter by price range
-    affordable_terms = ['affordable', 'cheap', 'budget', 'low price', 'inexpensive']
-    if any(term in text.lower() for term in affordable_terms):
-        return recommend_affordable_phones(text)
+    # Check for troubleshooting/spare parts queries
+    if is_troubleshooting_query(text):
+        parts = get_spare_part_recommendations(text)
+        if parts and parts[0] != "Spare parts database not available":
+            return parts
+    
+    # If it's a suggestion request, try to understand the context
+    if any(term in text.lower() for term in ['suggest', 'recommendation', 'recommend']):
+        context = extract_product_context(text)
+        if context:
+            return get_contextual_recommendations(context)
     
     # Original recommendation logic for general product queries
     if not crm_data or vector_db is None:
@@ -227,27 +236,57 @@ def is_troubleshooting_query(query: str) -> bool:
     return any(indicator in query.lower() for indicator in troubleshooting_indicators)
 
 def get_spare_part_recommendations(query: str) -> List[str]:
-    """Get spare part recommendations for troubleshooting queries"""
-    if spare_parts_dataset is None:
-        return ["Spare parts database not available"]
+    """Get spare part recommendations"""
+    global spare_parts_dataset  # Add this line to explicitly use global variable
+    
+    if spare_parts_dataset is None or spare_parts_dataset.empty:
+        try:
+            # Try to reload the dataset
+            spare_parts_dataset = pd.read_csv("spare_parts.csv")
+            print("Successfully reloaded spare parts dataset")
+        except Exception as e:
+            print(f"Error loading spare parts dataset: {e}")
+            return ["Spare parts database not available. Please try again later."]
     
     matched_parts = []
     query_lower = query.lower()
     
-    # Extract brand name from query if present
-    brands = ['samsung', 'apple', 'google', 'oneplus', 'xiaomi']
-    brand = next((b for b in brands if b in query_lower), None)
+    # Extract issue type from query
+    issue_types = {
+        'battery': ['battery', 'charging', 'power'],
+        'display': ['display', 'screen', 'touch'],
+        'camera': ['camera', 'photo', 'lens'],
+        'audio': ['speaker', 'sound', 'audio']
+    }
     
-    for _, part in spare_parts_dataset.iterrows():
-        keywords = str(part['Keywords']).lower().split(',')
-        compatible = str(part['Compatible Models']).lower()
+    issue_type = None
+    for type_, keywords in issue_types.items():
+        if any(keyword in query_lower for keyword in keywords):
+            issue_type = type_
+            break
+    
+    if issue_type:
+        print(f"Found issue type: {issue_type}")
         
-        # Match both keywords and brand if specified
-        if (any(keyword.strip() in query_lower for keyword in keywords) and 
-            (not brand or brand in compatible)):
-            matched_parts.append(f"{part['Part Name']} ({part['Price Range']}) - {part['Availability']}")
+    for _, part in spare_parts_dataset.iterrows():
+        if issue_type and str(part['Type']).lower() == issue_type:
+            matched_parts.append({
+                'name': part['Part Name'],
+                'price': part['Price Range'],
+                'availability': part['Availability'],
+                'compatible': part['Compatible Models']
+            })
     
-    return matched_parts[:5] if matched_parts else ["No specific spare parts found. Please visit a service center."]
+    # Update the format string to be cleaner
+    formatted_parts = [
+        f"{part['name']} - {part['price']} ({part['availability']}) - Compatible with: {part['compatible']}"
+        for part in matched_parts
+    ]
+    
+    if not formatted_parts:
+        return ["No specific spare parts found for your issue. Please visit a service center."]
+    
+    return formatted_parts[:5]
 
 def filter_phones_by_category(category: str, phone_dataset: pd.DataFrame) -> List[Dict[str, str]]:
     """
@@ -323,3 +362,98 @@ def semantic_phone_search(query: str, phone_dataset: pd.DataFrame) -> List[Dict[
     except Exception as e:
         print(f"Error in semantic search: {e}")
         return []
+
+def get_conversation_details(text):
+    """Get conversation analysis details"""
+    global phone_dataset, api_key
+    
+    if phone_dataset is None or phone_dataset.empty:
+        return {
+            'sentiment': 'NEUTRAL',
+            'score': 0.0,
+            'recommendations': ["Dataset not initialized properly"],
+            'questions': ["Please check system initialization"]
+        }
+    
+    sentiment, score = analyze_sentiment(text)
+    
+    # First check if it's a troubleshooting query
+    if is_troubleshooting_query(text):
+        recommendations = get_spare_part_recommendations(text)
+    else:
+        # Only generate CRM data for non-troubleshooting queries
+        current_crm_data = generate_crm_data([text], phone_dataset)
+        initialize_vector_db(current_crm_data)
+        recommendations = recommend_products(current_crm_data, text)
+    
+    dynamic_questions = generate_dynamic_questions(text, api_key)
+    return {
+        'sentiment': sentiment,
+        'score': score,
+        'recommendations': recommendations,
+        'questions': dynamic_questions
+    }
+
+def initialize_assistant(provided_api_key, phone_data_path="phone_comparison.csv", parts_data_path="spare_parts.csv"):
+    """Initialize the assistant with required global variables"""
+    global api_key, phone_dataset, spare_parts_dataset
+    api_key = provided_api_key
+    
+    try:
+        print(f"Loading datasets from: {phone_data_path} and {parts_data_path}")
+        phone_dataset = pd.read_csv(phone_data_path)
+        spare_parts_dataset = pd.read_csv(parts_data_path)
+        if phone_dataset.empty or spare_parts_dataset.empty:
+            raise ValueError("One or both datasets are empty")
+        print(f"Successfully loaded {len(phone_dataset)} phones and {len(spare_parts_dataset)} spare parts")
+        return True
+    except Exception as e:
+        print(f"Error initializing assistant: {e}")
+        phone_dataset = pd.DataFrame()
+        spare_parts_dataset = pd.DataFrame()
+        return False
+
+def recommend_foldable_phones():
+    """Get list of foldable phones from dataset"""
+    if phone_dataset is None or phone_dataset.empty:
+        return ["No phone data available"]
+    
+    foldable_phones = phone_dataset[
+        phone_dataset['Keywords'].str.contains('foldable|fold|flip', case=False, na=False)
+    ]['Phone Name'].tolist()
+    
+    return foldable_phones if foldable_phones else ["Samsung Galaxy Z Flip 6", "Google Pixel 9 Pro Fold"]
+
+def extract_product_context(text):
+    """Extract product context from query"""
+    context_keywords = {
+        'foldable': ['foldable', 'fold', 'flip'],
+        'gaming': ['gaming', 'game'],
+        'camera': ['camera', 'photo'],
+        'battery': ['battery', 'long lasting'],
+        'premium': ['premium', 'flagship']
+    }
+    
+    text_lower = text.lower()
+    for context, keywords in context_keywords.items():
+        if any(keyword in text_lower for keyword in keywords):
+            return context
+    return None
+
+def get_contextual_recommendations(context):
+    """Get recommendations based on context"""
+    if phone_dataset is None or phone_dataset.empty:
+        return ["No phone data available"]
+    
+    context_filters = {
+        'foldable': lambda df: df[df['Keywords'].str.contains('foldable|fold|flip', case=False, na=False)],
+        'gaming': lambda df: df[df['Keywords'].str.contains('gaming|performance', case=False, na=False)],
+        'camera': lambda df: df[df['Keywords'].str.contains('camera|photo', case=False, na=False)],
+        'battery': lambda df: df[df['Battery Capacity'].str.contains('5000|5500|6000', case=False, na=False)],
+        'premium': lambda df: df[df['Keywords'].str.contains('premium|flagship', case=False, na=False)]
+    }
+    
+    if context in context_filters:
+        filtered_df = context_filters[context](phone_dataset)
+        return filtered_df['Phone Name'].tolist()[:5]
+    return []
