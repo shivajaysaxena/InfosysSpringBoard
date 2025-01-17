@@ -436,19 +436,19 @@ def main():
             if results:
                 st.sidebar.subheader("Search Results")
                 for result in results:
-                    if 'display' in result:  # Phone result
-                        with st.sidebar.expander(result['name']):
-                            st.write("📱 Display:", result['display'])
-                            st.write("📸 Camera:", result['camera'])
+                    if 'specs' in result and 'display' in result:  # Phone result
+                        with st.sidebar.expander(f"📱 {result['name']}"):
+                            st.write("📌 Display:", result['display'])
                             st.write("⚙️ Specifications:", result['specs'])
-                            st.write("🔄 OS:", result['os'])
-                    else:  # Spare part result
+                            st.write("💰 Price Range:", result.get('camera', 'N/A'))
+                            st.write("ℹ️ Recommendation:", result.get('os', 'N/A'))
+                    else:  # Spare part or other result
                         with st.sidebar.expander(f"🔧 {result['name']}"):
-                            st.write("🛠️ Type:", result['type'])
-                            st.write("📱 Compatible with:", result['compatible'])
-                            st.write("💰 Price Range:", result['price'])
-                            st.write("✅ Availability:", result['availability'])
-                            st.write("ℹ️ ", result['message'])
+                            st.write("🛠️ Type:", result.get('type', 'N/A'))
+                            st.write("📱 Details:", result.get('compatible', 'N/A'))
+                            st.write("💰 Price:", result.get('price', 'N/A'))
+                            st.write("✅ Availability:", result.get('availability', 'N/A'))
+                            st.write("ℹ️ Recommendation:", result.get('message', 'N/A'))
             else:
                 st.sidebar.warning("No matching results found.")
 

@@ -47,33 +47,107 @@ def initialize_vector_db(data):
 def generate_embeddings(text):
     return embedding_model.encode(text)
 
+def is_mobile_related(text: str) -> bool:
+    """Check if the query is related to mobile phones or accessories"""
+    mobile_keywords = [
+        'phone', 'mobile', 'smartphone', 'iphone', 'android', 'samsung', 'display',
+        'screen', 'battery', 'camera', 'charging', 'processor', 'memory', 'storage',
+        'ram', 'speaker', 'microphone', 'xiaomi', 'oneplus', 'google pixel', 'realme',
+        'redmi', 'oppo', 'vivo', 'huawei', 'nothing', 'asus', 'sony', 'motorola',
+        'foldable', 'flip', 'accessories', 'charger', 'headphone', 'earphone', 'case',
+        'cover', 'adapter', 'power bank'
+    ]
+    text_lower = text.lower()
+    return any(keyword in text_lower for keyword in mobile_keywords)
+
+def generate_recommendations_with_gemini(text: str, api_key: str, context: str = None) -> List[str]:
+    """
+    Generate recommendations using Google Gemini API.
+    
+    Args:
+        text (str): User query/text
+        api_key (str): Google API key
+        context (str): Optional context (e.g., 'foldable', 'gaming', etc.)
+    """
+    if not is_mobile_related(text):
+        return ["No recommendations available - Query not related to mobile phones"]
+    
+    genai.configure(api_key=api_key)
+    
+    try:
+        model = genai.GenerativeModel('gemini-pro')
+        
+        # Create context-aware prompt
+        if context:
+            prompt = f"""
+            Given this user query: '{text}'
+            And the specific context: '{context}'
+            
+            Generate exactly 3 relevant product recommendations.
+            Focus on {context} devices and current market trends.
+            Format your response as a clean list with just the product names, like this:
+            1. [Product Name]
+            2. [Product Name]
+            3. [Product Name]
+            
+            Ensure recommendations are modern and relevant.
+            Do not include any other text or explanations.
+            """
+        else:
+            prompt = f"""
+            Given this user query: '{text}'
+            
+            Generate exactly 3 relevant product or spare part recommendations based on the query.
+            If it's a troubleshooting query, suggest appropriate spare parts or solutions.
+            Format your response as a clean list with just the recommendations, like this:
+            1. [Recommendation]
+            2. [Recommendation]
+            3. [Recommendation]
+            
+            Keep recommendations concise and directly relevant to the query.
+            Do not include any other text or explanations.
+            """
+        
+        response = model.generate_content(prompt)
+        
+        if response.text:
+            recommendations = []
+            for line in response.text.strip().split('\n'):
+                cleaned_line = line.strip()
+                if cleaned_line:
+                    recommendation = cleaned_line.split('. ', 1)[-1].strip()
+                    recommendations.append(recommendation)
+            
+            print("Generated recommendations:", recommendations)
+            return recommendations if recommendations else ["No specific recommendations available."]
+            
+    except Exception as e:
+        print(f"Error generating recommendations: {str(e)}")
+        return [f"Error generating recommendations: {str(e)}"]
+
 def recommend_products(crm_data, text):
+    """Updated to use Gemini for recommendations"""
+    if not is_mobile_related(text):
+        return ["No recommendations available - Query not related to mobile phones"]
+    
+    global api_key
+    
     # Check for foldable-specific queries
     if 'foldable' in text.lower():
-        return recommend_foldable_phones()
+        return generate_recommendations_with_gemini(text, api_key, context='foldable')
     
     # Check for troubleshooting/spare parts queries
     if is_troubleshooting_query(text):
-        parts = get_spare_part_recommendations(text)
-        if parts and parts[0] != "Spare parts database not available":
-            return parts
+        return generate_recommendations_with_gemini(text, api_key, context='repair')
     
     # If it's a suggestion request, try to understand the context
     if any(term in text.lower() for term in ['suggest', 'recommendation', 'recommend']):
         context = extract_product_context(text)
         if context:
-            return get_contextual_recommendations(context)
+            return generate_recommendations_with_gemini(text, api_key, context=context)
     
-    # Original recommendation logic for general product queries
-    if not crm_data or vector_db is None:
-        return ["No recommendations available."]
-    
-    query_embedding = np.array([generate_embeddings(text)]).astype(np.float32)
-    k = min(5, len(crm_data))
-    distances, indices = vector_db.search(query_embedding, k)
-    recommendations = [crm_data[i]["product"] for i in indices[0] if i < len(crm_data)]
-    
-    return list(dict.fromkeys(recommendations)) if recommendations else ["No recommendations available."]
+    # For general queries
+    return generate_recommendations_with_gemini(text, api_key)
 
 def recommend_affordable_phones(text):
     """Recommend phones based on affordability criteria"""
@@ -97,6 +171,9 @@ def generate_dynamic_questions(text: str, api_key: str) -> List[str]:
     Returns:
         List[str]: List of generated questions. Returns error messages if generation fails.
     """
+    if not is_mobile_related(text):
+        return ["No questions available - Query not related to mobile phones"]
+    
     # Configure the Generative AI library
     genai.configure(api_key=api_key)
     
@@ -182,51 +259,40 @@ def generate_crm_data(conversations, phone_dataset):
 
 
 def process_object_query(query: str, phone_dataset: pd.DataFrame) -> List[Dict[str, str]]:
-    # First check if it's a troubleshooting query
-    if is_troubleshooting_query(query):
-        return get_spare_part_recommendations(query)
+    """Updated to use Gemini for search results"""
+    global api_key
     
-    # Define category keywords
-    categories = {
-        'gaming': ['gaming', 'game', 'pubg', 'fps', 'performance', 'powerful'],
-        'camera': ['camera', 'photo', 'photography', 'selfie', 'videography'],
-        'business': ['business', 'work', 'professional', 'productivity'],
-        'display': ['display', 'screen', 'view', 'watching', 'multimedia'],
-        'battery': ['battery', 'long lasting', 'endurance', 'backup']
-    }
+    if not is_mobile_related(query):
+        return [{"name": "No results found", "message": "Query not related to mobile phones"}]
     
-    # Identify category from query
-    query_lower = query.lower()
-    matched_categories = []
+    # Generate results using Gemini
+    results = generate_search_results_with_gemini(query, api_key)
     
-    for category, keywords in categories.items():
-        if any(keyword in query_lower for keyword in keywords):
-            matched_categories.append(category)
+    # Format results for display
+    formatted_results = []
+    for result in results:
+        if 'name' in result:
+            if 'display' in result and 'specs' in result:
+                # Phone result format
+                formatted_results.append({
+                    'name': result['name'],
+                    'display': result['display'],
+                    'specs': result['specs'],
+                    'os': result.get('recommendation', 'N/A'),
+                    'camera': result.get('price', 'N/A')
+                })
+            else:
+                # Spare part or other result format
+                formatted_results.append({
+                    'name': result['name'],
+                    'type': result.get('display', 'N/A'),
+                    'compatible': result.get('specs', 'N/A'),
+                    'price': result.get('price', 'N/A'),
+                    'availability': result.get('availability', 'N/A'),
+                    'message': result.get('recommendation', 'N/A')
+                })
     
-    # Also check if any keywords from the dataset match
-    keyword_matches = phone_dataset[phone_dataset['Keywords'].str.contains(query_lower, case=False, na=False)]
-    
-    results = []
-    if matched_categories:
-        for category in matched_categories:
-            filtered_phones = filter_phones_by_category(category, phone_dataset)
-            results.extend(filtered_phones)
-    elif not keyword_matches.empty:
-        # If we have keyword matches but no category matches
-        results = [create_phone_dict(row) for _, row in keyword_matches.iterrows()]
-    else:
-        # If no specific category or keyword is matched, use semantic search
-        results = semantic_phone_search(query, phone_dataset)
-    
-    # Remove duplicates based on phone name
-    unique_results = []
-    seen_phones = set()
-    for phone in results:
-        if phone['name'] not in seen_phones:
-            unique_results.append(phone)
-            seen_phones.add(phone['name'])
-    
-    return unique_results[:5]  # Return top 5 unique results
+    return formatted_results if formatted_results else [{"name": "No results found", "message": "No matching results"}]
 
 def is_troubleshooting_query(query: str) -> bool:
     troubleshooting_indicators = [
@@ -236,57 +302,8 @@ def is_troubleshooting_query(query: str) -> bool:
     return any(indicator in query.lower() for indicator in troubleshooting_indicators)
 
 def get_spare_part_recommendations(query: str) -> List[str]:
-    """Get spare part recommendations"""
-    global spare_parts_dataset  # Add this line to explicitly use global variable
-    
-    if spare_parts_dataset is None or spare_parts_dataset.empty:
-        try:
-            # Try to reload the dataset
-            spare_parts_dataset = pd.read_csv("spare_parts.csv")
-            print("Successfully reloaded spare parts dataset")
-        except Exception as e:
-            print(f"Error loading spare parts dataset: {e}")
-            return ["Spare parts database not available. Please try again later."]
-    
-    matched_parts = []
-    query_lower = query.lower()
-    
-    # Extract issue type from query
-    issue_types = {
-        'battery': ['battery', 'charging', 'power'],
-        'display': ['display', 'screen', 'touch'],
-        'camera': ['camera', 'photo', 'lens'],
-        'audio': ['speaker', 'sound', 'audio']
-    }
-    
-    issue_type = None
-    for type_, keywords in issue_types.items():
-        if any(keyword in query_lower for keyword in keywords):
-            issue_type = type_
-            break
-    
-    if issue_type:
-        print(f"Found issue type: {issue_type}")
-        
-    for _, part in spare_parts_dataset.iterrows():
-        if issue_type and str(part['Type']).lower() == issue_type:
-            matched_parts.append({
-                'name': part['Part Name'],
-                'price': part['Price Range'],
-                'availability': part['Availability'],
-                'compatible': part['Compatible Models']
-            })
-    
-    # Update the format string to be cleaner
-    formatted_parts = [
-        f"{part['name']} - {part['price']} ({part['availability']}) - Compatible with: {part['compatible']}"
-        for part in matched_parts
-    ]
-    
-    if not formatted_parts:
-        return ["No specific spare parts found for your issue. Please visit a service center."]
-    
-    return formatted_parts[:5]
+    """Get spare part recommendations using Gemini"""
+    return generate_recommendations_with_gemini(query, api_key, context='spare parts')
 
 def filter_phones_by_category(category: str, phone_dataset: pd.DataFrame) -> List[Dict[str, str]]:
     """
@@ -367,6 +384,14 @@ def get_conversation_details(text):
     """Get conversation analysis details"""
     global phone_dataset, api_key
     
+    if not is_mobile_related(text):
+        return {
+            'sentiment': 'NEUTRAL',
+            'score': 0.0,
+            'recommendations': ["No recommendations available - Query not related to mobile phones"],
+            'questions': ["No questions available - Query not related to mobile phones"]
+        }
+    
     if phone_dataset is None or phone_dataset.empty:
         return {
             'sentiment': 'NEUTRAL',
@@ -414,15 +439,12 @@ def initialize_assistant(provided_api_key, phone_data_path="phone_comparison.csv
         return False
 
 def recommend_foldable_phones():
-    """Get list of foldable phones from dataset"""
-    if phone_dataset is None or phone_dataset.empty:
-        return ["No phone data available"]
-    
-    foldable_phones = phone_dataset[
-        phone_dataset['Keywords'].str.contains('foldable|fold|flip', case=False, na=False)
-    ]['Phone Name'].tolist()
-    
-    return foldable_phones if foldable_phones else ["Samsung Galaxy Z Flip 6", "Google Pixel 9 Pro Fold"]
+    """Get foldable phone recommendations using Gemini"""
+    return generate_recommendations_with_gemini(
+        "recommend latest foldable phones", 
+        api_key, 
+        context='foldable'
+    )
 
 def extract_product_context(text):
     """Extract product context from query"""
@@ -441,19 +463,73 @@ def extract_product_context(text):
     return None
 
 def get_contextual_recommendations(context):
-    """Get recommendations based on context"""
-    if phone_dataset is None or phone_dataset.empty:
-        return ["No phone data available"]
+    """Get context-based recommendations using Gemini"""
+    query = f"recommend best {context} phones"
+    return generate_recommendations_with_gemini(query, api_key, context=context)
+
+def generate_search_results_with_gemini(query: str, api_key: str) -> List[Dict[str, str]]:
+    """Generate search results using Google Gemini API"""
+    if not is_mobile_related(query):
+        return [{"name": "No results found", "message": "Query not related to mobile phones"}]
     
-    context_filters = {
-        'foldable': lambda df: df[df['Keywords'].str.contains('foldable|fold|flip', case=False, na=False)],
-        'gaming': lambda df: df[df['Keywords'].str.contains('gaming|performance', case=False, na=False)],
-        'camera': lambda df: df[df['Keywords'].str.contains('camera|photo', case=False, na=False)],
-        'battery': lambda df: df[df['Battery Capacity'].str.contains('5000|5500|6000', case=False, na=False)],
-        'premium': lambda df: df[df['Keywords'].str.contains('premium|flagship', case=False, na=False)]
-    }
+    genai.configure(api_key=api_key)
     
-    if context in context_filters:
-        filtered_df = context_filters[context](phone_dataset)
-        return filtered_df['Phone Name'].tolist()[:5]
-    return []
+    try:
+        model = genai.GenerativeModel('gemini-pro')
+        
+        # Create search-specific prompt
+        prompt = f"""
+        Given this search query: '{query}'
+        
+        Generate exactly 3 detailed product or spare part results.
+        If it's a troubleshooting query, include relevant spare parts and solutions.
+        
+        Format each result as a JSON-like structure with these fields:
+        1. {{
+            "name": "[Product/Part Name]",
+            "display": "[Display specs if phone, or type if spare part]",
+            "specs": "[Full specifications or part details]",
+            "price": "[Price range or estimate]",
+            "availability": "[Availability status]",
+            "recommendation": "[Why this is recommended]"
+        }}
+        2. {{Similar structure}}
+        3. {{Similar structure}}
+        
+        Keep information accurate and relevant to the query.
+        Include only the structured results, no additional text.
+        """
+        
+        response = model.generate_content(prompt)
+        
+        if response.text:
+            # Process and clean the response
+            results = []
+            try:
+                import json
+                # Extract JSON-like structures and parse them
+                response_text = response.text.strip()
+                # Split the response into individual JSON objects
+                json_strings = [s.strip() for s in response_text.split('}') if s.strip()]
+                
+                for json_str in json_strings:
+                    if json_str:
+                        # Add closing brace if missing
+                        if not json_str.endswith('}'):
+                            json_str += '}'
+                        # Remove numbering and clean the string
+                        json_str = json_str.lstrip('123.). ')
+                        try:
+                            result = json.loads(json_str)
+                            results.append(result)
+                        except json.JSONDecodeError:
+                            continue
+                
+                return results if results else [{"name": "No specific results found", "message": "Try being more specific"}]
+            except Exception as e:
+                print(f"Error parsing search results: {e}")
+                return [{"name": "Error", "message": "Failed to parse search results"}]
+    
+    except Exception as e:
+        print(f"Error generating search results: {e}")
+        return [{"name": "Error", "message": f"Error generating results: {str(e)}"}]
