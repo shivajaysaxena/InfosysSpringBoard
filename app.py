@@ -19,6 +19,7 @@ from assistant import (
     initialize_vector_db,
     load_phone_dataset,
     process_object_query,
+    is_troubleshooting_query  # Add this import
 )
 from fpdf import FPDF
 import time
@@ -148,6 +149,16 @@ def get_product_recommendations_summary(conversations):
         all_recommendations.extend(recommendations)
     return Counter(all_recommendations)
 
+# Add new function to get issues summary
+def get_issues_summary(conversations):
+    """Get summary of troubleshooting issues from conversations"""
+    issues = []
+    for conv_text, _ in conversations:
+        if is_troubleshooting_query(conv_text):  # Now this function will be recognized
+            issues.append(conv_text)
+    issue_freq = Counter(issues)
+    return dict(sorted(issue_freq.items(), key=lambda x: x[1], reverse=True)[:5])
+
 # Main Streamlit app
 # Load the phone dataset globally
 phone_dataset = load_phone_dataset("phone_comparison.csv")
@@ -183,65 +194,62 @@ def main():
             st.info("No conversation history available.")
         else:
             with summary_tab:
-                # Layout with columns
-                col1, col2 = st.columns(2)
+                # Top section with metrics
+                col1, col2, col3 = st.columns(3)
                 
                 with col1:
                     st.subheader("Conversation Overview")
                     total_conversations = len(conversations)
                     st.metric("Total Interactions", total_conversations)
-                    
-                    # Get sentiment metrics
+                
+                with col2:
+                    st.subheader("Sentiment Analysis")
                     sentiments = get_sentiment_metrics(conversations)
                     avg_sentiment_score = sum(s['score'] for s in sentiments) / len(sentiments)
                     st.metric("Average Sentiment Score", f"{avg_sentiment_score:.2f}")
+                    # Calculate average sentiment
+                    sentiment_counts = Counter([s['sentiment'] for s in sentiments])
+                    most_common_sentiment = sentiment_counts.most_common(1)[0][0]
+                    st.metric("Average Sentiment", most_common_sentiment)
+                
+                with col3:
+                    st.subheader("Top Products")
+                    product_freq = get_product_recommendations_summary(conversations)
+                    top_products = dict(sorted(product_freq.items(), key=lambda x: x[1], reverse=True)[:3])
+                    for product, count in top_products.items():
+                        st.write(f"• {product} ({count})")
+                
+                # Charts section
+                st.subheader("Analysis Trends")
+                
+                # Sentiment Timeline (keep existing)
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    sentiment_df = pd.DataFrame(sentiments)
+                    fig = px.line(
+                        sentiment_df,
+                        x='timestamp',
+                        y='score',
+                        title="Sentiment Score Timeline",
+                        labels={'score': 'Sentiment Score', 'timestamp': 'Time'}
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
                 
                 with col2:
-                    st.subheader("Most Frequent Terms")
-                    word_freq = get_conversation_summary(conversations)
-                    top_words = dict(sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:5])
-                    
-                    # Create bar chart for word frequency
-                    fig = px.bar(
-                        x=list(top_words.keys()),
-                        y=list(top_words.values()),
-                        title="Top 5 Most Frequent Terms"
-                    )
-                    st.plotly_chart(fig)
-                
-                # Sentiment Timeline
-                st.subheader("Sentiment Timeline")
-                sentiment_df = pd.DataFrame(sentiments)
-                fig = px.line(
-                    sentiment_df,
-                    x='timestamp',
-                    y='score',
-                    title="Sentiment Score Timeline",
-                    labels={'score': 'Sentiment Score', 'timestamp': 'Time'}
-                )
-                st.plotly_chart(fig)
-                
-                # Product Recommendations Summary
-                st.subheader("Top Recommended Products")
-                product_freq = get_product_recommendations_summary(conversations)
-                top_products = dict(sorted(product_freq.items(), key=lambda x: x[1], reverse=True)[:5])
-                
-                # Create horizontal bar chart for product recommendations
-                fig = go.Figure(go.Bar(
-                    x=list(top_products.values()),
-                    y=list(top_products.keys()),
-                    orientation='h'
-                ))
-                fig.update_layout(title="Most Recommended Products")
-                st.plotly_chart(fig)
-                
-                # Word Cloud Visualization
-                st.subheader("Conversation Word Cloud")
-                wordcloud = WordCloud(background_color='white').generate_from_frequencies(word_freq)
-                fig, ax = plt.subplots()
-                ax.imshow(wordcloud, interpolation='bilinear')
-                ax.axis('off')
-                st.pyplot(fig)
+                    # Replace product recommendations with issues summary
+                    st.subheader("Common Issues")
+                    issues_freq = get_issues_summary(conversations)
+                    if issues_freq:
+                        fig = go.Figure(go.Bar(
+                            x=list(issues_freq.values()),
+                            y=list(issues_freq.keys()),
+                            orientation='h'
+                        ))
+                        fig.update_layout(title="Top Reported Issues")
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("No issues reported yet")
             
             with detailed_tab:
                 # Existing detailed conversation view
