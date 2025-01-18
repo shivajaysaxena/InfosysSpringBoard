@@ -60,66 +60,152 @@ def is_mobile_related(text: str) -> bool:
     text_lower = text.lower()
     return any(keyword in text_lower for keyword in mobile_keywords)
 
-def generate_recommendations_with_gemini(text: str, api_key: str, context: str = None) -> List[str]:
-    """
-    Generate recommendations using Google Gemini API.
+# Add new function to filter recommendations against dataset
+def filter_recommendations_by_dataset(recommendations: List[str], dataset: pd.DataFrame) -> List[str]:
+    """Filter recommendations to only include products from the dataset"""
+    if dataset is None or dataset.empty:
+        return recommendations
     
-    Args:
-        text (str): User query/text
-        api_key (str): Google API key
-        context (str): Optional context (e.g., 'foldable', 'gaming', etc.)
-    """
+    filtered_recommendations = []
+    for rec in recommendations:
+        # Check if any product name in dataset contains the recommendation
+        matches = dataset[dataset['Phone Name'].str.contains(rec, case=False, na=False)]
+        if not matches.empty:
+            # Use the exact name from dataset
+            filtered_recommendations.append(matches.iloc[0]['Phone Name'])
+    
+    return filtered_recommendations if filtered_recommendations else ["No matching products found in our inventory"]
+
+# Modify the generate_recommendations_with_gemini function
+def generate_recommendations_with_gemini(text: str, api_key: str, context: str = None) -> List[str]:
+    """Generate recommendations using Google Gemini API."""
+    global phone_dataset, spare_parts_dataset
+    
     if not is_mobile_related(text):
         return ["No recommendations available - Query not related to mobile phones"]
     
+    # Extract brand from query and check availability
+    query_words = text.lower().split()
+    brands_in_phones = set(phone_dataset['Phone Name'].str.split().str[0].str.lower())
+    requested_brand = next((word for word in query_words if word in brands_in_phones), None)
+    
+    # Check if this is a troubleshooting query
+    if is_troubleshooting_query(text):
+        # Get relevant spare parts
+        if spare_parts_dataset is not None and not spare_parts_dataset.empty:
+            part_types = {
+                'display': ['display', 'screen'],
+                'battery': ['battery', 'charging', 'power'],
+                'camera': ['camera', 'lens'],
+                'audio': ['headphone', 'speaker', 'sound', 'audio', 'jack'],
+                'charging': ['charger', 'charging port', 'usb'],
+                'button': ['button', 'power button', 'volume'],
+                'sensor': ['fingerprint', 'sensor']
+            }
+            
+            # Determine part type from query
+            part_type = None
+            for type_name, keywords in part_types.items():
+                if any(keyword in text.lower() for keyword in keywords):
+                    part_type = type_name.title()
+                    break
+            
+            # Filter parts
+            if part_type:
+                # Convert both to lowercase for case-insensitive comparison
+                mask = spare_parts_dataset['Type'].str.lower() == part_type.lower()
+                matching_parts = spare_parts_dataset[mask]
+                
+                if not matching_parts.empty:
+                    parts = []
+                    for _, part in matching_parts.iterrows():
+                        # If brand mentioned, filter by brand
+                        if requested_brand:
+                            if requested_brand.lower() in part['Compatible Models'].lower():
+                                parts.append(f"{part['Part Name']} - {part['Price Range']} ({part['Availability']})")
+                        else:
+                            parts.append(f"{part['Part Name']} - {part['Price Range']} ({part['Availability']})")
+                    
+                    if parts:
+                        return parts[:3]
+            
+            return ["No specific spare parts found for your issue. Please visit a service center."]
+        
+        return ["Spare parts database not available. Please contact support."]
+    
+    # For phone recommendations (non-troubleshooting)
+    available_phones = phone_dataset['Phone Name'].tolist()
+    
+    # If specific brand requested but not available
+    if query_words and 'suggest' in text.lower() or 'recommendation' in text.lower():
+        brand_requested = next((word for word in query_words if word not in ['suggest', 'me', 'some', 'phones', 'recommend']), None)
+        if brand_requested and not any(brand_requested.lower() in phone.lower() for phone in available_phones):
+            return [
+                f"Brand '{brand_requested.title()}' is not available in our inventory.",
+                "Please explore our available brands:",
+                "Samsung, Apple, Google, OnePlus, Xiaomi, and more."
+            ]
+    
+    # Rest of the recommendation logic
     genai.configure(api_key=api_key)
     
     try:
         model = genai.GenerativeModel('gemini-pro')
         
-        # Create context-aware prompt
-        if context:
-            prompt = f"""
-            Given this user query: '{text}'
-            And the specific context: '{context}'
-            
-            Generate exactly 3 relevant product recommendations.
-            Focus on {context} devices and current market trends.
-            Format your response as a clean list with just the product names, like this:
-            1. [Product Name]
-            2. [Product Name]
-            3. [Product Name]
-            
-            Ensure recommendations are modern and relevant.
-            Do not include any other text or explanations.
-            """
-        else:
-            prompt = f"""
-            Given this user query: '{text}'
-            
-            Generate exactly 3 relevant product or spare part recommendations based on the query.
-            If it's a troubleshooting query, suggest appropriate spare parts or solutions.
-            Format your response as a clean list with just the recommendations, like this:
-            1. [Recommendation]
-            2. [Recommendation]
-            3. [Recommendation]
-            
-            Keep recommendations concise and directly relevant to the query.
-            Do not include any other text or explanations.
-            """
+        # Create dataset-aware prompt
+        prompt = f"""
+        Given this user query: '{text}'
+        Context: {context if context else 'general recommendation'}
+        
+        Available phones in our inventory:
+        {', '.join(available_phones)}
+        
+        Strict Rules:
+        1. ONLY recommend phones from the provided inventory list
+        2. If a specific brand is requested that's not in our inventory, reply with:
+           "This brand is not available in our inventory. Here are alternative recommendations:"
+        3. Generate exactly 3 recommendations
+        
+        Format response as:
+        If brand not available:
+        "This brand is not available in our inventory. Here are alternative recommendations:"
+        1. [Exact Phone Name from inventory]
+        2. [Exact Phone Name from inventory]
+        3. [Exact Phone Name from inventory]
+
+        If brand available or no specific brand:
+        1. [Exact Phone Name from inventory]
+        2. [Exact Phone Name from inventory]
+        3. [Exact Phone Name from inventory]
+        """
         
         response = model.generate_content(prompt)
         
         if response.text:
             recommendations = []
-            for line in response.text.strip().split('\n'):
+            lines = response.text.strip().split('\n')
+            
+            # Check if brand not available message is present
+            if "not available in our inventory" in lines[0].lower():
+                recommendations.append(lines[0].strip())
+                lines = lines[1:]  # Skip the message line
+            
+            # Process recommendation lines
+            for line in lines:
                 cleaned_line = line.strip()
-                if cleaned_line:
+                if cleaned_line and cleaned_line[0].isdigit():
                     recommendation = cleaned_line.split('. ', 1)[-1].strip()
-                    recommendations.append(recommendation)
+                    if recommendation in available_phones:
+                        recommendations.append(recommendation)
+            
+            # Ensure we have alternatives if brand not found
+            if len(recommendations) == 1 and "not available" in recommendations[0]:
+                # Get similar phones based on price range and features
+                similar_phones = phone_dataset.sample(n=min(3, len(phone_dataset)))['Phone Name'].tolist()
+                recommendations.extend(similar_phones)
             
             print("Generated recommendations:", recommendations)
-            return recommendations if recommendations else ["No specific recommendations available."]
+            return recommendations if recommendations else ["No matching products found in our inventory"]
             
     except Exception as e:
         print(f"Error generating recommendations: {str(e)}")
