@@ -148,6 +148,7 @@ pinecone-client==5.0.1
 pinecone-plugin-inference==1.1.0
 pinecone-plugin-interface==0.0.7
 platformdirs==4.2.2
+plotly==5.24.1
 preshed==3.0.9
 prometheus_client==0.20.0
 prompt_toolkit==3.0.47
@@ -195,6 +196,7 @@ rsa==4.9
 safetensors==0.4.5
 scikit-learn==1.5.2
 scipy==1.14.1
+seaborn==0.13.2
 Send2Trash==1.8.3
 sentence-transformers==3.3.1
 setuptools==71.1.0
@@ -254,6 +256,7 @@ websocket-client==1.8.0
 Werkzeug==3.0.4
 wheel==0.44.0
 widgetsnbextension==4.0.11
+wordcloud==1.9.4
 wrapt==1.16.0
 wsproto==1.2.0
 xgboost==2.1.2

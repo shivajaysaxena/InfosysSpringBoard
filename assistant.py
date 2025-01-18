@@ -15,20 +15,6 @@ sentiment_analyzer = pipeline("sentiment-analysis")
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 vector_db = None
 
-def recognize_speech(file_path):
-    recognizer = sr.Recognizer()
-    try:
-        with sr.AudioFile(file_path) as source:
-            audio = recognizer.record(source)
-        recognized_text = recognizer.recognize_google(audio)
-        return recognized_text
-    except sr.UnknownValueError:
-        return "Sorry, I couldn't understand the speech."
-    except sr.RequestError as e:
-        return f"Error with the speech recognition service: {e}"
-    except Exception as e:
-        return f"An unexpected error occurred: {e}"
-
 def initialize_vector_db(data):
     global vector_db
     if not data:
@@ -235,17 +221,6 @@ def recommend_products(crm_data, text):
     # For general queries
     return generate_recommendations_with_gemini(text, api_key)
 
-def recommend_affordable_phones(text):
-    """Recommend phones based on affordability criteria"""
-    affordable_phones = [
-        "Google Pixel 9",
-        "Nothing 2",
-        "Poco F6 Pro",
-        "Redmi K70 Pro",
-        "Realme GT Neo 6"
-    ]
-    return affordable_phones
-
 def generate_dynamic_questions(text: str, api_key: str) -> List[str]:
     """
     Generate dynamic questions using Google Gemini API.
@@ -308,17 +283,6 @@ def analyze_sentiment(text):
         return sentiment, score
     except Exception as e:
         return f"Sentiment analysis failed: {e}", 0.0
-
-def load_datasets(phone_path="phone_comparison.csv", parts_path="spare_parts.csv"):
-    global spare_parts_dataset
-    try:
-        phone_dataset = pd.read_csv(phone_path)
-        spare_parts_dataset = pd.read_csv(parts_path)
-        print("Datasets loaded successfully")
-        return phone_dataset
-    except Exception as e:
-        print(f"Error loading datasets: {e}")
-        return pd.DataFrame()  # Return empty DataFrame on error
 
 def load_phone_dataset(file_path="phone_comparison.csv"):
     try:
@@ -390,81 +354,6 @@ def is_troubleshooting_query(query: str) -> bool:
 def get_spare_part_recommendations(query: str) -> List[str]:
     """Get spare part recommendations using Gemini"""
     return generate_recommendations_with_gemini(query, api_key, context='spare parts')
-
-def filter_phones_by_category(category: str, phone_dataset: pd.DataFrame) -> List[Dict[str, str]]:
-    """
-    Filter phones based on category-specific criteria.
-    """
-    def extract_number(value):
-        try:
-            return pd.to_numeric(''.join(filter(str.isdigit, str(value))))
-        except:
-            return 0
-
-    criteria = {
-        'gaming': lambda df: df[
-            (df['RAM'].apply(extract_number) >= 6) &  # At least 6GB RAM
-            (df['Processor'].str.contains('Snapdragon|Dimensity|Gaming', case=False, na=False))
-        ],
-        'camera': lambda df: df[
-            (df['Rear Camera'].str.contains('108MP|64MP|48MP', case=False, na=False)) |
-            (df['Front Camera'].str.contains('32MP|20MP', case=False, na=False))
-        ],
-        'business': lambda df: df[
-            (df['RAM'].apply(extract_number) >= 6) &
-            (df['Storage'].apply(extract_number) >= 128)
-        ],
-        'display': lambda df: df[
-            df['Resolution'].str.contains('2K|1440|AMOLED|120Hz', case=False, na=False)
-        ],
-        'battery': lambda df: df[
-            df['Battery Capacity'].apply(extract_number) >= 5000
-        ]
-    }
-    
-    try:
-        filtered_df = criteria.get(category, lambda df: df)(phone_dataset)
-        return [create_phone_dict(row) for _, row in filtered_df.iterrows()]
-    except Exception as e:
-        print(f"Error filtering phones for category {category}: {e}")
-        return []
-
-def create_phone_dict(row: pd.Series) -> Dict[str, str]:
-    """
-    Create a standardized dictionary from a phone dataset row.
-    """
-    return {
-        'name': str(row['Phone Name']),
-        'display': str(row['Display']),
-        'camera': f"Front: {str(row['Front Camera'])}, Rear: {str(row['Rear Camera'])}",
-        'specs': f"RAM: {str(row['RAM'])}, Storage: {str(row['Storage'])}, Battery: {str(row['Battery Capacity'])}, Processor: {str(row['Processor'])}",
-        'os': str(row['OS'])
-    }
-
-def semantic_phone_search(query: str, phone_dataset: pd.DataFrame) -> List[Dict[str, str]]:
-    """
-    Perform semantic search on phone dataset using query embeddings.
-    """
-    try:
-        # Create query embedding
-        query_embedding = embedding_model.encode(query)
-        
-        # Create embeddings for phone descriptions
-        phone_descriptions = phone_dataset.apply(
-            lambda row: f"{row['Phone Name']} {row['Keywords']} {row['Display']} {row['Processor']}", 
-            axis=1
-        ).tolist()
-        
-        phone_embeddings = np.array([embedding_model.encode(desc) for desc in phone_descriptions])
-        
-        # Calculate similarities
-        similarities = np.dot(phone_embeddings, query_embedding)
-        top_indices = np.argsort(similarities)[-5:][::-1]  # Get top 5 matches
-        
-        return [create_phone_dict(phone_dataset.iloc[idx]) for idx in top_indices]
-    except Exception as e:
-        print(f"Error in semantic search: {e}")
-        return []
 
 def get_conversation_details(text):
     """Get conversation analysis details"""

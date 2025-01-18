@@ -1,17 +1,10 @@
 from dotenv import load_dotenv
 import os
-
-# Load environment variables from .env file
-load_dotenv()
-
-# Access the API key
-api_key = os.getenv('API_KEY')
 import sqlite3
 import streamlit as st
 import speech_recognition as sr
 from datetime import datetime
 from assistant import (
-    recognize_speech,
     analyze_sentiment,
     recommend_products,
     generate_dynamic_questions,
@@ -19,7 +12,8 @@ from assistant import (
     initialize_vector_db,
     load_phone_dataset,
     process_object_query,
-    is_troubleshooting_query  # Add this import
+    is_troubleshooting_query,
+    initialize_assistant
 )
 from fpdf import FPDF
 import time
@@ -30,10 +24,10 @@ import plotly.graph_objects as go
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 
-# Move imports to top
-from assistant import initialize_assistant
+# Load environment variables from .env file
+load_dotenv()
 
-# After environment variables are loaded
+# Access the API key
 api_key = os.getenv('API_KEY')
 
 # Initialize assistant before using any functionality
@@ -179,7 +173,7 @@ def main():
     # Sidebar options including new Dashboard
     option = st.sidebar.radio(
         "Choose an action", 
-        ["Dashboard", "Live Recording", "Upload Audio File", "Search Query"]
+        ["Dashboard", "Live Recording", "Search Query"]
     )
 
     if option == "Dashboard":
@@ -404,37 +398,6 @@ def main():
                     st.error("Speech recognition service unavailable.")
                     print("Error: Speech recognition service unavailable.")
 
-    elif option == "Upload Audio File":
-        st.header("Upload Audio File")
-        uploaded_file = st.file_uploader("Upload an audio file", type=["wav", "mp3"])
-        if uploaded_file:
-            file_path = os.path.join("uploads", uploaded_file.name)
-            os.makedirs("uploads", exist_ok=True)
-            with open(file_path, "wb") as f:
-                f.write(uploaded_file.read())
-            text = recognize_speech(file_path)
-            sentiment, score = analyze_sentiment(text)
-            crm_data = generate_crm_data(conversations, phone_dataset)
-            recommendations = recommend_products(crm_data, text)
-            dynamic_questions = generate_dynamic_questions(text, api_key)
-
-            st.success(f"Transcript: {text}")
-            st.write(f"Sentiment: {sentiment}")
-            st.write(f"Score: {score}")
-            st.write("Recommendations:")
-            st.write(recommendations)
-            st.write("Dynamic Questions:")
-            st.write(dynamic_questions)
-
-            st.session_state.transcripts.append({
-                "text": text,
-                "sentiment": sentiment,
-                "score": score,
-                "shift": "None",
-                "recommendations": recommendations,
-                "questions": dynamic_questions,
-            })
-    
     elif option == "Search Query":
         st.sidebar.header("Product & Support Search")
         search_query = st.sidebar.text_input("Search for phones or describe issues", "")
