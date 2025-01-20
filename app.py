@@ -23,6 +23,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
+import google.generativeai as genai
 
 # Load environment variables from .env file
 load_dotenv()
@@ -153,6 +154,58 @@ def get_issues_summary(conversations):
     issue_freq = Counter(issues)
     return dict(sorted(issue_freq.items(), key=lambda x: x[1], reverse=True)[:5])
 
+# Add new function for summarization using Gemini
+def generate_conversation_summary(conversations, api_key):
+    """Generate a summary of all conversations using Gemini"""
+    if not conversations:
+        return "No conversations to summarize."
+        
+    all_text = "\n".join([f"User: {conv[0]}" for conv in conversations])
+    
+    genai.configure(api_key=api_key)
+    try:
+        model = genai.GenerativeModel('gemini-pro')
+        prompt = f"""
+        Analyze these customer service conversations and create a concise summary:
+        {all_text}
+
+        Create a summary that includes:
+        1. Main topics discussed
+        2. Common issues or requests
+        3. Overall customer sentiment
+        4. Key product interests
+        5. Notable trends
+
+        Format as a clear, professional paragraph.
+        Keep it concise but informative.
+        """
+        
+        response = model.generate_content(prompt)
+        return response.text if response.text else "Unable to generate summary."
+    except Exception as e:
+        return f"Error generating summary: {str(e)}"
+
+# Update the calculate_sentiment_shifts function for better visualization
+def calculate_sentiment_shifts(sentiments):
+    """Calculate sentiment shifts between consecutive conversations"""
+    shifts = []
+    for i in range(len(sentiments)-1):
+        current = sentiments[i]
+        next_sentiment = sentiments[i+1]
+        shift = next_sentiment['score'] - current['score']
+        # Add more context to shifts
+        shifts.append({
+            'from_time': current['timestamp'],
+            'to_time': next_sentiment['timestamp'],
+            'shift': shift,
+            'magnitude': abs(shift),
+            'direction': 'Positive' if shift > 0 else 'Negative' if shift < 0 else 'Neutral',
+            'from_text': current['text'][:50] + '...',  # Include conversation snippet
+            'from_sentiment': current['sentiment'],
+            'to_sentiment': next_sentiment['sentiment']
+        })
+    return shifts
+
 # Main Streamlit app
 # Load the phone dataset globally
 phone_dataset = load_phone_dataset("phone_comparison.csv")
@@ -188,6 +241,13 @@ def main():
             st.info("No conversation history available.")
         else:
             with summary_tab:
+                # Add conversation summary at the top
+                st.subheader("Conversation Overview")
+                summary = generate_conversation_summary(conversations, api_key)
+                st.write(summary)
+                
+                st.markdown("---")  # Add divider
+                
                 # Top section with metrics
                 col1, col2, col3 = st.columns(3)
                 
@@ -216,7 +276,7 @@ def main():
                 # Charts section
                 st.subheader("Analysis Trends")
                 
-                # Sentiment Timeline (keep existing)
+                # Sentiment Timeline and Heatmap
                 col1, col2 = st.columns(2)
                 
                 with col1:
@@ -229,6 +289,65 @@ def main():
                         labels={'score': 'Sentiment Score', 'timestamp': 'Time'}
                     )
                     st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Enhanced Sentiment Shift Heatmap
+                    shifts = calculate_sentiment_shifts(sentiments)
+                    if shifts:
+                        st.subheader("Sentiment Shift Analysis")
+                        
+                        # Create heatmap
+                        shift_df = pd.DataFrame(shifts)
+                        fig = go.Figure(data=go.Heatmap(
+                            z=[[s['shift']] for s in shifts],
+                            x=[s['from_time'] for s in shifts],
+                            y=['Sentiment Change'],
+                            colorscale=[
+                                [0, 'red'],     # Strong negative
+                                [0.4, 'yellow'], # Mild negative
+                                [0.5, 'white'],  # Neutral
+                                [0.6, 'lightgreen'], # Mild positive
+                                [1, 'darkgreen']    # Strong positive
+                            ],
+                            text=[[f"{s['shift']:.2f}<br>({s['direction']})"] for s in shifts],
+                            texttemplate="%{text}",
+                            textfont={"size": 10},
+                            colorbar=dict(
+                                title='Sentiment Shift',
+                                ticktext=['Very Negative', 'Negative', 'Neutral', 'Positive', 'Very Positive'],
+                                tickvals=[-1, -0.5, 0, 0.5, 1]
+                            )
+                        ))
+                        
+                        fig.update_layout(
+                            title="Conversation Sentiment Shifts",
+                            xaxis_title="Time",
+                            height=200,
+                            margin=dict(l=60, r=30, t=40, b=20)
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Add shift details table
+                        st.subheader("Shift Details")
+                        shift_details = pd.DataFrame([{
+                            'Time': s['from_time'],
+                            'From': s['from_sentiment'],
+                            'To': s['to_sentiment'],
+                            'Change': f"{s['shift']:.2f}",
+                            'Context': s['from_text']
+                        } for s in shifts])
+                        
+                        st.dataframe(
+                            shift_details,
+                            column_config={
+                                "Time": "Timestamp",
+                                "From": "Initial Sentiment",
+                                "To": "Next Sentiment",
+                                "Change": "Sentiment Shift",
+                                "Context": "Conversation Snippet"
+                            },
+                            hide_index=True
+                        )
                 
                 with col2:
                     # Replace product recommendations with issues summary
