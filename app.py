@@ -28,10 +28,13 @@ import google.generativeai as genai
 # Load environment variables from .env file
 load_dotenv()
 
-# Access the API key
+# Access the API key and validate
 api_key = os.getenv('API_KEY')
+if not api_key:
+    st.error("API_KEY not found in environment variables. Please set it in your .env file.")
+    st.stop()
 
-# Initialize assistant before using any functionality
+# Initialize assistant with validated API key
 success = initialize_assistant(api_key, "phone_comparison.csv", "spare_parts.csv")
 if not success:
     st.error("Failed to initialize assistant. Please check your datasets and API key.")
@@ -185,7 +188,44 @@ def generate_conversation_summary(conversations, api_key):
     except Exception as e:
         return f"Error generating summary: {str(e)}"
 
-# Update the calculate_sentiment_shifts function for better visualization
+# Add new function to generate search query summary
+def generate_search_query_summary(conversations, api_key):
+    """Generate a summary of search queries using Gemini"""
+    search_patterns = get_search_summary(conversations)
+    if search_patterns['total_searches'] == 0:
+        return "No search queries to analyze."
+    
+    search_text = "\n".join([
+        "Product Searches:\n" + "\n".join(search_patterns['recent_searches']['products']),
+        "Feature Searches:\n" + "\n".join(search_patterns['recent_searches']['features']),
+        "Issue Searches:\n" + "\n".join(search_patterns['recent_searches']['issues'])
+    ])
+    
+    genai.configure(api_key=api_key)
+    try:
+        model = genai.GenerativeModel('gemini-pro')
+        prompt = f"""
+        Analyze these search queries and create a concise summary:
+        {search_text}
+
+        Create an analysis that includes:
+        1. Most common search patterns
+        2. Popular product categories
+        3. Frequently requested features
+        4. Common issues or problems
+        5. User preferences and trends
+
+        Format as a clear, professional paragraph.
+        Focus on actionable insights about user interests and needs.
+        Keep it concise but informative.
+        """
+        
+        response = model.generate_content(prompt)
+        return response.text if response.text else "Unable to generate search summary."
+    except Exception as e:
+        return f"Error generating search summary: {e}"
+
+# Update the calculate_sentiment_shifts function
 def calculate_sentiment_shifts(sentiments):
     """Calculate sentiment shifts between consecutive conversations"""
     shifts = []
@@ -193,18 +233,57 @@ def calculate_sentiment_shifts(sentiments):
         current = sentiments[i]
         next_sentiment = sentiments[i+1]
         shift = next_sentiment['score'] - current['score']
-        # Add more context to shifts
+        
+        # Categorize shift magnitude for better visualization
+        if abs(shift) < 0.2:
+            magnitude = "Minimal"
+        elif abs(shift) < 0.5:
+            magnitude = "Moderate"
+        else:
+            magnitude = "Significant"
+            
+        direction = "🔼" if shift > 0 else "🔽" if shift < 0 else "➡️"
+        
         shifts.append({
             'from_time': current['timestamp'],
             'to_time': next_sentiment['timestamp'],
             'shift': shift,
-            'magnitude': abs(shift),
-            'direction': 'Positive' if shift > 0 else 'Negative' if shift < 0 else 'Neutral',
-            'from_text': current['text'][:50] + '...',  # Include conversation snippet
+            'magnitude': magnitude,
+            'direction': direction,
             'from_sentiment': current['sentiment'],
-            'to_sentiment': next_sentiment['sentiment']
+            'to_sentiment': next_sentiment['sentiment'],
+            'from_text': current['text'][:50] + '...',
+            'shift_description': f"{direction} {magnitude} ({shift:.2f})"
         })
     return shifts
+
+# Add new function to track search queries
+def get_search_summary(conversations):
+    """Analyze search patterns from conversations"""
+    search_patterns = {
+        'products': [],
+        'issues': [],
+        'features': []
+    }
+    
+    feature_keywords = ['camera', 'battery', 'display', 'processor', 'ram', 'storage']
+    
+    for conv_text, _ in conversations:
+        if any(term in conv_text.lower() for term in ['search', 'find', 'looking for', 'suggest']):
+            if is_troubleshooting_query(conv_text):
+                search_patterns['issues'].append(conv_text)
+            elif any(feature in conv_text.lower() for feature in feature_keywords):
+                search_patterns['features'].append(conv_text)
+            else:
+                search_patterns['products'].append(conv_text)
+    
+    return {
+        'total_searches': len(search_patterns['products']) + len(search_patterns['issues']) + len(search_patterns['features']),
+        'product_searches': len(search_patterns['products']),
+        'issue_searches': len(search_patterns['issues']),
+        'feature_searches': len(search_patterns['features']),
+        'recent_searches': search_patterns
+    }
 
 # Main Streamlit app
 # Load the phone dataset globally
@@ -295,56 +374,77 @@ def main():
                     if shifts:
                         st.subheader("Sentiment Shift Analysis")
                         
-                        # Create heatmap
+                        # Create enhanced heatmap
                         shift_df = pd.DataFrame(shifts)
-                        fig = go.Figure(data=go.Heatmap(
+                        fig = go.Figure()
+                        
+                        # Add heatmap
+                        fig.add_trace(go.Heatmap(
                             z=[[s['shift']] for s in shifts],
                             x=[s['from_time'] for s in shifts],
                             y=['Sentiment Change'],
                             colorscale=[
-                                [0, 'red'],     # Strong negative
-                                [0.4, 'yellow'], # Mild negative
-                                [0.5, 'white'],  # Neutral
-                                [0.6, 'lightgreen'], # Mild positive
-                                [1, 'darkgreen']    # Strong positive
+                                [0, '#ff4444'],      # Strong negative (red)
+                                [0.25, '#ffab91'],    # Mild negative (light red)
+                                [0.5, '#ffffff'],     # Neutral (white)
+                                [0.75, '#a5d6a7'],   # Mild positive (light green)
+                                [1, '#00c853']       # Strong positive (green)
                             ],
-                            text=[[f"{s['shift']:.2f}<br>({s['direction']})"] for s in shifts],
-                            texttemplate="%{text}",
-                            textfont={"size": 10},
+                            showscale=True,
                             colorbar=dict(
-                                title='Sentiment Shift',
+                                title='Sentiment Change',
+                                titleside='right',
+                                thickness=15,
+                                len=0.75,
                                 ticktext=['Very Negative', 'Negative', 'Neutral', 'Positive', 'Very Positive'],
-                                tickvals=[-1, -0.5, 0, 0.5, 1]
+                                tickvals=[-1, -0.5, 0, 0.5, 1],
+                                tickmode='array'
                             )
                         ))
                         
+                        # Add markers for shift direction
+                        fig.add_trace(go.Scatter(
+                            x=[s['from_time'] for s in shifts],
+                            y=['Sentiment Change'] * len(shifts),
+                            mode='text',
+                            text=[s['direction'] for s in shifts],
+                            textposition='middle center',
+                            showlegend=False
+                        ))
+                        
                         fig.update_layout(
-                            title="Conversation Sentiment Shifts",
+                            title={
+                                'text': "Conversation Sentiment Shifts",
+                                'y': 0.95,
+                                'x': 0.5,
+                                'xanchor': 'center',
+                                'yanchor': 'top'
+                            },
+                            height=180,
+                            margin=dict(l=60, r=30, t=40, b=20),
                             xaxis_title="Time",
-                            height=200,
-                            margin=dict(l=60, r=30, t=40, b=20)
+                            yaxis=dict(showgrid=False),
+                            plot_bgcolor='rgba(255,255,255,0.9)'
                         )
                         
                         st.plotly_chart(fig, use_container_width=True)
                         
-                        # Add shift details table
-                        st.subheader("Shift Details")
+                        # Add detailed shift table with improved formatting
+                        st.subheader("Detailed Sentiment Changes")
                         shift_details = pd.DataFrame([{
                             'Time': s['from_time'],
-                            'From': s['from_sentiment'],
-                            'To': s['to_sentiment'],
-                            'Change': f"{s['shift']:.2f}",
-                            'Context': s['from_text']
+                            'Change': s['shift_description'],
+                            'From': f"{s['from_sentiment']} ({s['from_text']})",
+                            'To': s['to_sentiment']
                         } for s in shifts])
                         
                         st.dataframe(
                             shift_details,
                             column_config={
-                                "Time": "Timestamp",
-                                "From": "Initial Sentiment",
-                                "To": "Next Sentiment",
-                                "Change": "Sentiment Shift",
-                                "Context": "Conversation Snippet"
+                                "Time": st.column_config.DatetimeColumn("Time", format="D MMM, HH:mm"),
+                                "Change": st.column_config.Column("Shift", width="medium"),
+                                "From": st.column_config.Column("Initial Context", width="large"),
+                                "To": st.column_config.Column("Final Sentiment", width="medium")
                             },
                             hide_index=True
                         )
@@ -364,6 +464,112 @@ def main():
                     else:
                         st.info("No issues reported yet")
             
+            with summary_tab:
+                # Add search analytics section after the metrics
+                st.markdown("---")
+                st.subheader("Search Analytics")
+                
+                search_metrics = get_search_summary(conversations)
+                
+                # Display search metrics in columns
+                c1, c2, c3, c4 = st.columns(4)
+                with c1:
+                    st.metric("Total Searches", search_metrics['total_searches'])
+                with c2:
+                    st.metric("Product Searches", search_metrics['product_searches'])
+                with c3:
+                    st.metric("Feature Searches", search_metrics['feature_searches'])
+                with c4:
+                    st.metric("Issue Searches", search_metrics['issue_searches'])
+                
+                # Create search patterns visualization
+                if search_metrics['total_searches'] > 0:
+                    # Create pie chart of search distribution
+                    search_dist = {
+                        'Products': search_metrics['product_searches'],
+                        'Features': search_metrics['feature_searches'],
+                        'Issues': search_metrics['issue_searches']
+                    }
+                    
+                    fig = go.Figure(data=[go.Pie(
+                        labels=list(search_dist.keys()),
+                        values=list(search_dist.values()),
+                        hole=.3,
+                        marker_colors=['#2ecc71', '#3498db', '#e74c3c']
+                    )])
+                    
+                    fig.update_layout(
+                        title="Search Query Distribution",
+                        showlegend=True,
+                        height=300,
+                        margin=dict(t=30, b=0, l=0, r=0)
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Show recent searches
+                    with st.expander("Recent Search Details"):
+                        if search_metrics['recent_searches']['products']:
+                            st.subheader("Product Searches")
+                            for search in search_metrics['recent_searches']['products'][-3:]:
+                                st.info(search)
+                        
+                        if search_metrics['recent_searches']['features']:
+                            st.subheader("Feature-based Searches")
+                            for search in search_metrics['recent_searches']['features'][-3:]:
+                                st.success(search)
+                        
+                        if search_metrics['recent_searches']['issues']:
+                            st.subheader("Issue-related Searches")
+                            for search in search_metrics['recent_searches']['issues'][-3:]:
+                                st.warning(search)
+                else:
+                    st.info("No search queries recorded yet.")
+                
+                st.markdown("---")
+                
+                # Continue with existing dashboard content
+                # ...existing code...
+
+                # Add new search summary section
+                st.markdown("---")
+                st.subheader("Search Query Analysis")
+                
+                # Add two columns for search metrics and summary
+                search_col1, search_col2 = st.columns([2, 3])
+                
+                with search_col1:
+                    # Search metrics in a more compact format
+                    search_metrics = get_search_summary(conversations)
+                    st.metric("Total Searches", search_metrics['total_searches'])
+                    search_dist = {
+                        'Products': search_metrics['product_searches'],
+                        'Features': search_metrics['feature_searches'],
+                        'Issues': search_metrics['issue_searches']
+                    }
+                    
+                    # Create donut chart for search distribution
+                    if search_metrics['total_searches'] > 0:
+                        fig = go.Figure(data=[go.Pie(
+                            labels=list(search_dist.keys()),
+                            values=list(search_dist.values()),
+                            hole=.4,
+                            marker_colors=['#2ecc71', '#3498db', '#e74c3c']
+                        )])
+                        fig.update_layout(
+                            title="Search Distribution",
+                            showlegend=True,
+                            height=250,
+                            margin=dict(t=30, b=0, l=0, r=0)
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                
+                with search_col2:
+                    # Generate and display search pattern analysis
+                    search_summary = generate_search_query_summary(conversations, api_key)
+                    st.markdown("### Search Pattern Analysis")
+                    st.write(search_summary)
+
             with detailed_tab:
                 # Existing detailed conversation view
                 st.subheader("Detailed Conversation History")

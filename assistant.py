@@ -133,8 +133,6 @@ def generate_recommendations_with_gemini(text: str, api_key: str, context: str =
             ]
     
     # Rest of the recommendation logic
-    genai.configure(api_key=api_key)
-    
     try:
         model = genai.GenerativeModel('gemini-pro')
         
@@ -198,12 +196,20 @@ def generate_recommendations_with_gemini(text: str, api_key: str, context: str =
         return [f"Error generating recommendations: {str(e)}"]
 
 def recommend_products(crm_data, text):
-    """Updated to use Gemini for recommendations"""
+    """Updated to handle feature-based recommendations"""
     if not is_mobile_related(text):
         return ["No recommendations available - Query not related to mobile phones"]
     
     global api_key
     
+    # Extract features from query
+    features = extract_features_from_query(text)
+    
+    # If features found, use feature-based recommendations
+    if features:
+        return generate_feature_based_recommendations(text, api_key, features)
+    
+    # Otherwise use existing recommendation logic
     # Check for foldable-specific queries
     if 'foldable' in text.lower():
         return generate_recommendations_with_gemini(text, api_key, context='foldable')
@@ -399,6 +405,10 @@ def initialize_assistant(provided_api_key, phone_data_path="phone_comparison.csv
     global api_key, phone_dataset, spare_parts_dataset
     api_key = provided_api_key
     
+    # Configure Gemini API right after setting api_key
+    genai.configure(api_key=provided_api_key)
+    print("Configured Gemini API with provided key")
+    
     try:
         print(f"Loading datasets from: {phone_data_path} and {parts_data_path}")
         phone_dataset = pd.read_csv(phone_data_path)
@@ -508,3 +518,63 @@ def generate_search_results_with_gemini(query: str, api_key: str) -> List[Dict[s
     except Exception as e:
         print(f"Error generating search results: {e}")
         return [{"name": "Error", "message": f"Error generating results: {str(e)}"}]
+
+def extract_features_from_query(text: str) -> Dict[str, List[str]]:
+    """Extract phone features from query text"""
+    feature_keywords = {
+        'display': ['amoled', 'oled', 'lcd', 'screen', 'display', 'inch', '"', '120hz', '90hz', 'refresh'],
+        'camera': ['camera', 'mp', 'megapixel', 'ultra', 'wide', 'zoom', 'photo', 'selfie', 'rear'],
+        'performance': ['processor', 'snapdragon', 'dimensity', 'gaming', 'fps', 'ram', 'storage', 'gb'],
+        'battery': ['mah', 'battery', 'charging', 'fast charge', 'power'],
+        'special': ['foldable', 'flip', 'waterproof', 'rugged', '5g', 'wireless']
+    }
+    
+    found_features = {category: [] for category in feature_keywords}
+    text_lower = text.lower()
+    
+    for category, keywords in feature_keywords.items():
+        for keyword in keywords:
+            if keyword in text_lower:
+                found_features[category].append(keyword)
+    
+    return {k: v for k, v in found_features.items() if v}
+
+def generate_feature_based_recommendations(text: str, api_key: str, features: Dict[str, List[str]]) -> List[str]:
+    """Generate recommendations based on specific features using Gemini"""
+    global phone_dataset
+    
+    if not features:
+        return ["No specific features mentioned in the query"]
+    
+    feature_summary = ", ".join([f"{k}: {', '.join(v)}" for k, v in features.items()])
+    available_phones = phone_dataset['Phone Name'].tolist()
+    
+    prompt = f"""
+    Find phones matching these features: {feature_summary}
+    From this list of available phones: {', '.join(available_phones)}
+    
+    Rules:
+    1. ONLY recommend phones from the provided list
+    2. MUST match at least one requested feature
+    3. Recommend exactly 3 phones if possible
+    4. Format as:
+       1. [Phone Name] - [Why it matches the requirements]
+       2. [Phone Name] - [Why it matches the requirements]
+       3. [Phone Name] - [Why it matches the requirements]
+    """
+    
+    try:
+        model = genai.GenerativeModel('gemini-pro')
+        response = model.generate_content(prompt)
+        
+        if response.text:
+            recommendations = []
+            for line in response.text.strip().split('\n'):
+                if line.strip() and line[0].isdigit():
+                    phone_name = line.split('-')[0].split('.')[1].strip()
+                    if phone_name in available_phones:
+                        recommendations.append(phone_name)
+            
+            return recommendations if recommendations else ["No phones match the specified features"]
+    except Exception as e:
+        return [f"Error generating recommendations: {str(e)}"]
