@@ -315,40 +315,18 @@ def generate_crm_data(conversations, phone_dataset):
 
 
 def process_object_query(query: str, phone_dataset: pd.DataFrame) -> List[Dict[str, str]]:
-    """Updated to use Gemini for search results"""
+    """Updated to handle issues better"""
     global api_key
     
     if not is_mobile_related(query):
         return [{"name": "No results found", "message": "Query not related to mobile phones"}]
     
-    # Generate results using Gemini
-    results = generate_search_results_with_gemini(query, api_key)
+    # Check if this is an issue-related query
+    if is_troubleshooting_query(query):
+        return generate_issue_results_with_gemini(query, api_key)
     
-    # Format results for display
-    formatted_results = []
-    for result in results:
-        if 'name' in result:
-            if 'display' in result and 'specs' in result:
-                # Phone result format
-                formatted_results.append({
-                    'name': result['name'],
-                    'display': result['display'],
-                    'specs': result['specs'],
-                    'os': result.get('recommendation', 'N/A'),
-                    'camera': result.get('price', 'N/A')
-                })
-            else:
-                # Spare part or other result format
-                formatted_results.append({
-                    'name': result['name'],
-                    'type': result.get('display', 'N/A'),
-                    'compatible': result.get('specs', 'N/A'),
-                    'price': result.get('price', 'N/A'),
-                    'availability': result.get('availability', 'N/A'),
-                    'message': result.get('recommendation', 'N/A')
-                })
-    
-    return formatted_results if formatted_results else [{"name": "No results found", "message": "No matching results"}]
+    # For non-issue queries, use existing search logic
+    return generate_search_results_with_gemini(query, api_key)
 
 def is_troubleshooting_query(query: str) -> bool:
     troubleshooting_indicators = [
@@ -457,67 +435,128 @@ def generate_search_results_with_gemini(query: str, api_key: str) -> List[Dict[s
     if not is_mobile_related(query):
         return [{"name": "No results found", "message": "Query not related to mobile phones"}]
     
+    global phone_dataset
     genai.configure(api_key=api_key)
     
     try:
         model = genai.GenerativeModel('gemini-pro')
         
-        # Create search-specific prompt
+        # Create search-specific prompt with actual phone data
         prompt = f"""
         Given this search query: '{query}'
+        And this phone data:
+        {phone_dataset[['Phone Name', 'Display', 'RAM', 'Storage', 'Battery Capacity', 'Processor', 'Keywords']].to_string()}
         
-        Generate exactly 3 detailed product or spare part results.
-        If it's a troubleshooting query, include relevant spare parts and solutions.
+        Generate exactly 3 detailed product results based on the phone data.
         
-        Format each result as a JSON-like structure with these fields:
-        1. {{
-            "name": "[Product/Part Name]",
-            "display": "[Display specs if phone, or type if spare part]",
-            "specs": "[Full specifications or part details]",
-            "price": "[Price range or estimate]",
-            "availability": "[Availability status]",
-            "recommendation": "[Why this is recommended]"
+        Format each result as a complete JSON object with these exact fields:
+        {{
+            "name": "EXACT Phone Name from dataset",
+            "display": "Full Display specs from dataset",
+            "specs": "Detailed specs including RAM, Storage, Battery, Processor",
+            "price_category": "Budget($200-400)/Mid($400-800)/Premium($800+)",
+            "keywords": "Key features and selling points"
         }}
-        2. {{Similar structure}}
-        3. {{Similar structure}}
-        
-        Keep information accurate and relevant to the query.
-        Include only the structured results, no additional text.
+
+        Ensure each response is proper JSON format and use actual data from the dataset.
         """
         
         response = model.generate_content(prompt)
         
         if response.text:
-            # Process and clean the response
-            results = []
             try:
                 import json
-                # Extract JSON-like structures and parse them
-                response_text = response.text.strip()
-                # Split the response into individual JSON objects
-                json_strings = [s.strip() for s in response_text.split('}') if s.strip()]
+                # Clean up the response text to ensure valid JSON
+                text = response.text.strip()
+                # Extract all JSON objects
+                import re
+                json_objects = re.findall(r'\{[^{}]*\}', text)
                 
-                for json_str in json_strings:
-                    if json_str:
-                        # Add closing brace if missing
-                        if not json_str.endswith('}'):
-                            json_str += '}'
-                        # Remove numbering and clean the string
-                        json_str = json_str.lstrip('123.). ')
-                        try:
-                            result = json.loads(json_str)
+                results = []
+                for json_str in json_objects:
+                    try:
+                        result = json.loads(json_str)
+                        # Verify required fields
+                        if all(key in result for key in ['name', 'display', 'specs', 'price_category']):
                             results.append(result)
-                        except json.JSONDecodeError:
-                            continue
+                    except json.JSONDecodeError:
+                        continue
                 
-                return results if results else [{"name": "No specific results found", "message": "Try being more specific"}]
+                return results if results else [{"name": "No specific results found", "display": "N/A", "specs": "N/A", "price_category": "N/A"}]
+                
             except Exception as e:
                 print(f"Error parsing search results: {e}")
-                return [{"name": "Error", "message": "Failed to parse search results"}]
+                return [{"name": "Error", "display": "N/A", "specs": "Error parsing results", "price_category": "N/A"}]
     
     except Exception as e:
         print(f"Error generating search results: {e}")
-        return [{"name": "Error", "message": f"Error generating results: {str(e)}"}]
+        return [{"name": "Error", "display": "N/A", "specs": f"Error: {str(e)}", "price_category": "N/A"}]
+
+def generate_issue_results_with_gemini(query: str, api_key: str) -> List[Dict[str, str]]:
+    """Generate troubleshooting results using Google Gemini API"""
+    genai.configure(api_key=api_key)
+    
+    try:
+        model = genai.GenerativeModel('gemini-pro')
+        
+        # Create a more focused troubleshooting prompt
+        prompt = f"""
+        Analyze this mobile phone issue: '{query}'
+        
+        Provide 3 potential solutions, from basic to advanced troubleshooting.
+        
+        Format each solution in this exact JSON structure:
+        {{
+            "name": "Brief issue title",
+            "type": "Hardware or Software issue",
+            "diagnosis": "Detailed problem description",
+            "solution": "Step-by-step fix instructions",
+            "parts": "Required tools or parts",
+            "cost": "Estimated repair cost",
+            "difficulty": "Easy/Medium/Hard",
+            "warning": "Safety or warranty warnings"
+        }}
+
+        Ensure proper JSON formatting and practical solutions.
+        """
+        
+        response = model.generate_content(prompt)
+        
+        if response.text:
+            try:
+                import json
+                import re
+                json_objects = re.findall(r'\{[^{}]*\}', response.text)
+                
+                results = []
+                for json_str in json_objects:
+                    try:
+                        result = json.loads(json_str)
+                        if all(key in result for key in ['name', 'type', 'diagnosis', 'solution']):
+                            results.append(result)
+                    except json.JSONDecodeError:
+                        continue
+                
+                if not results:
+                    return [{
+                        "name": "Troubleshooting Required",
+                        "type": "General Issue",
+                        "diagnosis": "Could not determine specific issue",
+                        "solution": "Please contact customer support",
+                        "parts": "Unknown",
+                        "cost": "To be determined",
+                        "difficulty": "N/A",
+                        "warning": "Professional diagnosis recommended"
+                    }]
+                
+                return results
+                
+            except Exception as e:
+                print(f"Error parsing issue results: {e}")
+                return [{"name": "Error", "type": "Error", "diagnosis": "Failed to parse results", "solution": str(e)}]
+    except Exception as e:
+        print(f"Error generating issue results: {e}")
+        return [{"name": "Error", "type": "Error", "diagnosis": "Failed to generate results", "solution": str(e)}]
 
 def extract_features_from_query(text: str) -> Dict[str, List[str]]:
     """Extract phone features from query text"""

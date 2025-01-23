@@ -305,7 +305,7 @@ def main():
     # Sidebar options including new Dashboard
     option = st.sidebar.radio(
         "Choose an action", 
-        ["Dashboard", "Live Recording", "Search Query"]
+        ["Dashboard", "Live Recording"]  # Removed separate "Search Query" option
     )
 
     if option == "Dashboard":
@@ -625,128 +625,178 @@ def main():
     elif option == "Live Recording":
         st.header("Live Recording")
 
-        recognizer = sr.Recognizer()
-        microphone = sr.Microphone()
+        # Create two columns: one for recording and one for search results
+        main_col, search_col = st.columns([2, 1])
 
-        st.write("Start speaking...")
+        with main_col:
+            recognizer = sr.Recognizer()
+            microphone = sr.Microphone()
 
-        # Buttons for Start and Stop recording on the same line
-        col1, col2 = st.columns(2)
-        with col1:
-            if not st.session_state.get("recording_active", False):
-                if st.button("Start Recording"):
-                    st.session_state.recording_active = True
-                    st.session_state["previous_sentiment"] = None  # Reset previous sentiment
-                    st.write("Recording started...")
-        with col2:
+            st.write("Start speaking...")
+
+            # Recording controls
+            col1, col2 = st.columns(2)
+            with col1:
+                if not st.session_state.get("recording_active", False):
+                    if st.button("Start Recording"):
+                        st.session_state.recording_active = True
+                        st.session_state["previous_sentiment"] = None
+                        st.write("Recording started...")
+            with col2:
+                if st.session_state.get("recording_active", False):
+                    if st.button("Stop Recording"):
+                        st.session_state.recording_active = False
+                        st.write("Recording stopped.")
+
+            # Recording logic
             if st.session_state.get("recording_active", False):
-                if st.button("Stop Recording"):
-                    st.session_state.recording_active = False
-                    st.write("Recording stopped.")
+                with microphone as source:
+                    recognizer.adjust_for_ambient_noise(source)
+                    try:
+                        st.info("Listening... Speak now!")
+                        audio = recognizer.listen(source, timeout=5)
+                        text = recognizer.recognize_google(audio)
+                        if text:
+                            save_conversation(session_id, text)
+                            st.write(f"Transcript: {text}")
+                    except sr.WaitTimeoutError:
+                        st.warning("No speech detected. Please try again.")
+                    except sr.RequestError:
+                        st.error("Could not access the speech recognition service.")
+                    except sr.UnknownValueError:
+                        st.warning("Could not understand audio. Please try again.")
+                    except Exception as e:
+                        st.error(f"An error occurred: {str(e)}")
 
-        # Start Recording
-        if st.session_state.get("recording_active", False):
-            with microphone as source:
-                recognizer.adjust_for_ambient_noise(source)
-                try:
-                    st.info("Listening... Speak now!")
-
-                    while st.session_state.get("recording_active", False):
-                        try:
-                            # Capture audio in small chunks
-                            audio = recognizer.listen(source, timeout=10, phrase_time_limit=5)  # Increased timeout to 10 sec
-                            text = recognizer.recognize_google(audio)
-
-                            # Debugging statements
-                            print(f"Transcript: {text}")
-
-                            if text:
-                                st.session_state["latest_transcript"] = text
-                                # Save conversation but use only current text for recommendations
-                                save_conversation(session_id, text)
-
-                                sentiment, score = analyze_sentiment(text)
-
-                                # Debugging statements
-                                print(f"Sentiment: {sentiment}")
-                                print(f"Score: {score}")
-
-                                # Sentiment shift logic
-                                previous_sentiment = st.session_state.get("previous_sentiment", None)
-                                sentiment_shift = "None"
-
-                                if previous_sentiment and previous_sentiment != sentiment:
-                                    sentiment_shift = "Changed" if previous_sentiment != sentiment else "Same"
-                                
-                                # Update previous sentiment for the next comparison
-                                st.session_state["previous_sentiment"] = sentiment
-
-                                # Generate CRM data using only the current text
-                                current_crm_data = generate_crm_data([text], phone_dataset)
-                                initialize_vector_db(current_crm_data)
-                                recommendations = recommend_products(current_crm_data, text)
-                                dynamic_questions = generate_dynamic_questions(text, api_key)
-
-                                st.session_state["latest_sentiment"] = sentiment
-                                st.session_state["latest_score"] = score
-                                st.session_state["latest_recommendations"] = recommendations
-                                st.session_state["latest_questions"] = dynamic_questions
-
-                                # Display analysis
-                                st.write(f"Transcript: {text}")
-                                st.write(f"Sentiment: {sentiment}")
-                                st.write(f"Score: {score}")
-                                st.write(f"Recommendations: {', '.join(recommendations)}")
-                                st.write(f"Dynamic Questions: {', '.join(dynamic_questions)}")
-                                st.write(f"Sentiment Shift: {sentiment_shift}")
-
-                                # Append to transcripts list for PDF generation
-                                st.session_state.transcripts.append({
-                                    "text": text,
-                                    "sentiment": sentiment,
-                                    "score": score,
-                                    "shift": sentiment_shift,
-                                    "recommendations": recommendations,
-                                    "questions": dynamic_questions,
-                                })
-
-                            time.sleep(1)  # Sleep to avoid overwhelming the processor
-
-                        except sr.WaitTimeoutError:
-                            print("No speech detected. Waiting for the next phrase...")
-                            time.sleep(1)  # Wait before trying again
-
-                except sr.UnknownValueError:
-                    st.error("Could not understand the speech.")
-                    print("Error: Could not understand the speech.")
-                except sr.RequestError:
-                    st.error("Speech recognition service unavailable.")
-                    print("Error: Speech recognition service unavailable.")
-
-    elif option == "Search Query":
-        st.sidebar.header("Product & Support Search")
-        search_query = st.sidebar.text_input("Search for phones or describe issues", "")
-        if search_query:
-            results = process_object_query(search_query, phone_dataset)
+        # Add search functionality in the side column
+        with search_col:
+            st.header("Quick Search")
             
-            if results:
-                st.sidebar.subheader("Search Results")
-                for result in results:
-                    if 'specs' in result and 'display' in result:  # Phone result
-                        with st.sidebar.expander(f"📱 {result['name']}"):
-                            st.write("📌 Display:", result['display'])
-                            st.write("⚙️ Specifications:", result['specs'])
-                            st.write("💰 Price Range:", result.get('camera', 'N/A'))
-                            st.write("ℹ️ Recommendation:", result.get('os', 'N/A'))
-                    else:  # Spare part or other result
-                        with st.sidebar.expander(f"🔧 {result['name']}"):
-                            st.write("🛠️ Type:", result.get('type', 'N/A'))
-                            st.write("📱 Details:", result.get('compatible', 'N/A'))
-                            st.write("💰 Price:", result.get('price', 'N/A'))
-                            st.write("✅ Availability:", result.get('availability', 'N/A'))
-                            st.write("ℹ️ Recommendation:", result.get('message', 'N/A'))
-            else:
-                st.sidebar.warning("No matching results found.")
+            # Add quick filters for common searches first
+            st.subheader("Quick Filters")
+            
+            # Create two columns for filter buttons with descriptive categories
+            filter_col1, filter_col2 = st.columns(2)
+            
+            # Product filters
+            with filter_col1:
+                st.caption("Products")
+                latest_phones = st.button("📱 Latest Phones")
+                gaming_phones = st.button("🎮 Gaming Phones")
+                
+            # Issue filters
+            with filter_col2:
+                st.caption("Common Issues")
+                battery_issues = st.button("🔋 Battery Issues")
+                camera_issues = st.button("📷 Camera Issues")
+                screen_issues = st.button("🖥️ Screen Issues")
+            
+            # Determine search query and context based on button clicks
+            search_query = ""
+            is_issue_search = False
+            
+            if latest_phones:
+                search_query = "recommend latest flagship phones"
+            elif gaming_phones:
+                search_query = "recommend gaming phones"
+            elif battery_issues:
+                search_query = "battery not working problem"
+                is_issue_search = True
+            elif camera_issues:
+                search_query = "camera not working issue"
+                is_issue_search = True
+            elif screen_issues:
+                search_query = "screen display not working problem"
+                is_issue_search = True
+            
+            # Text input for manual search
+            manual_search = st.text_input("Search phones or issues", value=search_query)
+            
+            # Use either the button-triggered search or manual input
+            current_search = manual_search or search_query
+            
+            # Check if the current search is issue-related
+            if not is_issue_search and manual_search:
+                is_issue_search = is_troubleshooting_query(manual_search)
+            
+            if current_search:
+                results = process_object_query(current_search, phone_dataset)
+                
+                if results:
+                    st.subheader("Search Results")
+                    
+                    # Handle issue-related results differently
+                    if is_issue_search:
+                        st.markdown("#### Troubleshooting Results")
+                        for result in results:
+                            # Changed expanded=True to expanded=False
+                            with st.expander(f"🔧 {result.get('name', 'Issue')}", expanded=False):
+                                st.markdown("### Problem Details")
+                                st.info(f"Type: {result.get('type', 'N/A')}")
+                                
+                                st.markdown("### Diagnosis")
+                                st.write(result.get('diagnosis', 'No diagnosis available'))
+                                
+                                st.markdown("### Solution")
+                                solution_text = result.get('solution', '')
+                                steps = solution_text.split('\n') if isinstance(solution_text, str) else [solution_text]
+                                for i, step in enumerate(steps, 1):
+                                    if step.strip():
+                                        st.write(f"{i}. {step.strip()}")
+                                
+                                # Create columns for additional info
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.markdown("**Parts/Tools Needed**")
+                                    st.write(result.get('parts', 'N/A'))
+                                with col2:
+                                    st.markdown("**Estimated Cost**")
+                                    st.write(result.get('cost', 'N/A'))
+                                
+                                difficulty = result.get('difficulty', 'N/A')
+                                st.markdown("**Difficulty Level**")
+                                if difficulty.lower() == 'easy':
+                                    st.success(difficulty)
+                                elif difficulty.lower() == 'medium':
+                                    st.warning(difficulty)
+                                else:
+                                    st.error(difficulty)
+                                
+                                if result.get('warning'):
+                                    st.warning(f"⚠️ {result['warning']}")
+                    else:
+                        # Handle product results
+                        for result in results:
+                            # Changed expanded=True to expanded=False
+                            with st.expander(f"📱 {result.get('name', 'Unknown Device')}", expanded=False):
+                                # Create two columns for specs
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    st.markdown("**📱 Display**")
+                                    st.write(result.get('display', 'N/A'))
+                                    st.markdown("**💰 Price Category**")
+                                    price_cat = result.get('price_category', 'N/A')
+                                    if 'budget' in price_cat.lower():
+                                        st.success(price_cat)
+                                    elif 'mid' in price_cat.lower():
+                                        st.info(price_cat)
+                                    else:
+                                        st.warning(price_cat)
+                                
+                                with col2:
+                                    st.markdown("**⚙️ Specifications**")
+                                    st.write(result.get('specs', 'N/A'))
+                                
+                                if result.get('keywords'):
+                                    st.markdown("**🔑 Key Features**")
+                                    st.info(result.get('keywords', 'N/A'))
+
+                else:
+                    if is_issue_search:
+                        st.warning("No troubleshooting results found. Please contact support.")
+                    else:
+                        st.warning("No matching products found.")
 
 if __name__ == "__main__":
     initialize_database()
