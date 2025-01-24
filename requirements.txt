@@ -181,8 +181,6 @@ python-engineio
 python-json-logger
 python-socketio
 pytz
-pywin32
-pywinpty
 PyYAML
 pyzmq
 qtconsole
