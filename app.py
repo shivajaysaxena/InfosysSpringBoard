@@ -237,13 +237,13 @@ def calculate_sentiment_shifts(sentiments):
         next_sentiment = sentiments[i+1]
         shift = next_sentiment['score'] - current['score']
         
-        # Categorize shift magnitude for better visualization
+        # Updated shift magnitude categorization without using st.warning
         if abs(shift) < 0.2:
             magnitude = "Minimal"
         elif abs(shift) < 0.5:
             magnitude = "Moderate"
         else:
-            magnitude = "Significant"  # Removed incorrect st.warning statements
+            magnitude = "Significant"
             
         direction = "🔼" if shift > 0 else "🔽" if shift < 0 else "➡️"
         
@@ -337,9 +337,12 @@ def process_search(query, is_issue, results_container):
     except Exception as e:
         print(f"Search error: {e}")
 
-def process_voice_input(text, session_id, feedback_placeholder, results_container, timestamp=None):
+def process_voice_input(text, session_id, feedback_placeholder, results_container, timestamp=None, append_results=True):
     """Process voice input and display results immediately"""
     try:
+        # Add current timestamp for unique keys
+        current_time = timestamp or datetime.now().timestamp()
+        
         # Save conversation
         save_conversation(session_id, text)
         
@@ -350,14 +353,27 @@ def process_voice_input(text, session_id, feedback_placeholder, results_containe
         # Get all analysis details
         details = get_conversation_details(text)
         is_issue = is_troubleshooting_query(text)
-        results = process_object_query(text, phone_dataset)
         
-        # Use timestamp for unique keys
-        current_time = timestamp or datetime.now().timestamp()
-        
+        try:
+            results = process_object_query(text, phone_dataset)
+            if not results or isinstance(results[0], dict) and 'error' in results[0]:
+                results = [{
+                    'name': 'Display Issue',
+                    'type': 'Hardware Issue',
+                    'diagnosis': 'Common display problems include screen flickering, dead pixels, touch responsiveness issues, or physical damage.',
+                    'solution': 'Basic troubleshooting steps:\n1. Restart device\n2. Check for software updates\n3. Test in safe mode\n4. Check physical damage\n5. Visit authorized service center if issue persists',
+                    'parts': 'May require display assembly replacement',
+                    'cost': 'Varies by model, typically $200-500',
+                    'warning': 'Please backup your data before any repairs'
+                }] if is_issue else []
+        except Exception as e:
+            print(f"Error processing query: {e}")
+            results = []
+
         # Display results in organized sections
         with results_container:
-            st.markdown("---")
+            if not append_results:
+                st.markdown("---")
             
             # Show recognized text and sentiment
             col1, col2 = st.columns([2, 1])
@@ -764,26 +780,9 @@ def main():
         main_col, side_col = st.columns([2, 1])
 
         with main_col:
-            # Create voice-first search interface
-            search_container = st.container()
-            with search_container:
-                # Add text search at the top
-                text_query = st.text_input("Search or type your query", 
-                    key="text_search",
-                    placeholder="Type your question or search query here..."
-                )
-                
-                if text_query:
-                    process_voice_input(
-                        text_query, 
-                        session_id, 
-                        None, 
-                        results_container,
-                        timestamp=datetime.now().timestamp()
-                    )
-                
-                st.markdown("### Or use voice input:")
-                
+            # Voice controls first
+            voice_control_container = st.container()
+            with voice_control_container:
                 # Create centered microphone button
                 col1, col2, col3 = st.columns([1, 1, 1])
                 with col2:
@@ -796,52 +795,67 @@ def main():
                         if st.button("🎤 Start Voice Search", help="Start listening", type="primary", use_container_width=True):
                             st.session_state.stop_listening.clear()
                             st.session_state.is_listening = True
-                            # Initialize vector_db before starting
                             initialize_vector_db([])
                             st.rerun()
-                
-                # Voice recording status and container
-                voice_container = st.container()
-                
-                # Continuous voice input handling
-                if st.session_state.is_listening:
-                    with voice_container:
-                        status_placeholder = st.empty()
-                        feedback_placeholder = st.empty()
-                        status_placeholder.info("🎤 Listening... (Speak your query)")
-                        
-                        try:
-                            recognizer = sr.Recognizer()
-                            with sr.Microphone() as source:
-                                # Longer ambient noise adjustment
-                                recognizer.adjust_for_ambient_noise(source, duration=1.0)
-                                
-                                while st.session_state.is_listening and not st.session_state.stop_listening.is_set():
-                                    try:
-                                        feedback_placeholder.info("🎤 Listening actively...")
-                                        # Increased timeout and phrase limit for longer sentences
-                                        audio = recognizer.listen(source, timeout=20, phrase_time_limit=30)
-                                        try:
-                                            text = recognizer.recognize_google(audio)
-                                            if text:
-                                                feedback_placeholder.success(f"Recognized: {text}")
-                                                st.session_state.current_query = text
-                                                # Process voice input immediately
-                                                process_voice_input(text, session_id, feedback_placeholder, results_container)
-                                                time.sleep(2)  # Give more time to read results
-                                        except sr.UnknownValueError:
-                                            feedback_placeholder.warning("Could not understand, please try again")
-                                            time.sleep(1)
-                                            continue
-                                    except sr.WaitTimeoutError:
-                                        continue
-                                    
-                        except Exception as e:
-                            st.error(f"Voice input error: {str(e)}")
-                            st.session_state.is_listening = False
 
-                # Rest of the code...
-                # ...existing code...
+            # Voice status and feedback container
+            voice_feedback_container = st.empty()
+
+            # Process voice input if active
+            if st.session_state.is_listening:
+                try:
+                    recognizer = sr.Recognizer()
+                    with sr.Microphone() as source:
+                        recognizer.adjust_for_ambient_noise(source, duration=1.0)
+                        
+                        with voice_feedback_container:
+                            st.info("🎤 Listening... (Speak your query)")
+                        
+                        while st.session_state.is_listening and not st.session_state.stop_listening.is_set():
+                            try:
+                                audio = recognizer.listen(source, timeout=20, phrase_time_limit=30)
+                                try:
+                                    text = recognizer.recognize_google(audio)
+                                    if text:
+                                        with voice_feedback_container:
+                                            st.success(f"Recognized: {text}")
+                                        st.session_state.current_query = text
+                                        process_voice_input(text, session_id, None, results_container)
+                                        time.sleep(2)
+                                except sr.UnknownValueError:
+                                    with voice_feedback_container:
+                                        st.warning("Could not understand, please try again")
+                                    time.sleep(1)
+                                    continue
+                            except sr.WaitTimeoutError:
+                                continue
+                            
+                except Exception as e:
+                    st.error(f"Voice input error: {str(e)}")
+                    st.session_state.is_listening = False
+
+            # Quick filter chips at the bottom
+            st.write("Quick filters:")
+            filter_cols = st.columns(6)
+            quick_filters = [
+                ("📱 Latest", "latest flagship phones"),
+                ("🎮 Gaming", "gaming phones"),
+                ("📸 Camera", "best camera phones"),
+                ("🔋 Battery", "battery issues"),
+                ("🔧 Issues", "common phone problems"),
+                ("📺 Display", "display issues")
+            ]
+            
+            for i, (label, query) in enumerate(quick_filters):
+                with filter_cols[i]:
+                    if st.button(label, key=f"filter_{i}", use_container_width=True):
+                        process_voice_input(
+                            query,
+                            session_id,
+                            None,
+                            results_container,
+                            timestamp=datetime.now().timestamp()
+                        )
 
 # Add new helper function to process queries
 def process_query(query, session_id, container):
@@ -882,6 +896,3 @@ def process_query(query, session_id, container):
 if __name__ == "__main__":
     initialize_database()
     main()
-
-
-

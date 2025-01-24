@@ -494,69 +494,80 @@ def generate_search_results_with_gemini(query: str, api_key: str) -> List[Dict[s
 
 def generate_issue_results_with_gemini(query: str, api_key: str) -> List[Dict[str, str]]:
     """Generate troubleshooting results using Google Gemini API"""
-    genai.configure(api_key=api_key)
-    
     try:
+        # Add fallback responses for common issues
+        issue_types = {
+            'display': {
+                'name': 'Display Issue',
+                'type': 'Hardware Issue',
+                'diagnosis': 'Common display problems include screen flickering, dead pixels, touch responsiveness issues, or physical damage.',
+                'solution': 'Basic troubleshooting steps:\n1. Restart device\n2. Check for software updates\n3. Test in safe mode\n4. Check physical damage\n5. Visit authorized service center if issue persists',
+                'parts': 'May require display assembly replacement',
+                'cost': 'Varies by model, typically $200-500',
+                'warning': 'Please backup your data before any repairs'
+            },
+            'battery': {
+                'name': 'Battery Issue',
+                'type': 'Hardware Issue',
+                'diagnosis': 'Common battery problems include rapid drain, not charging, or swelling.',
+                'solution': 'Basic troubleshooting steps:\n1. Check charging cable and adapter\n2. Clear cache\n3. Check battery-heavy apps\n4. Consider battery replacement if old',
+                'parts': 'Battery pack replacement may be needed',
+                'cost': 'Typically $30-100 depending on model',
+                'warning': 'Use only genuine batteries from authorized sources'
+            },
+            'general': {
+                'name': 'General Issue',
+                'type': 'Hardware/Software',
+                'diagnosis': 'Requires specific diagnosis based on symptoms',
+                'solution': 'Basic troubleshooting steps:\n1. Restart device\n2. Check for updates\n3. Clear cache\n4. Factory reset if needed',
+                'parts': 'To be determined after diagnosis',
+                'cost': 'Varies based on issue',
+                'warning': 'Always backup data before major repairs'
+            }
+        }
+
+        # Determine issue type from query
+        issue_type = 'general'
+        for key in issue_types.keys():
+            if key in query.lower():
+                issue_type = key
+                break
+
+        # Use fallback response if Gemini API fails
+        genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-pro')
         
-        # Create a more focused troubleshooting prompt
         prompt = f"""
         Analyze this mobile phone issue: '{query}'
-        
-        Provide 3 potential solutions, from basic to advanced troubleshooting.
-        
-        Format each solution in this exact JSON structure:
-        {{
-            "name": "Brief issue title",
-            "type": "Hardware or Software issue",
-            "diagnosis": "Detailed problem description",
-            "solution": "Step-by-step fix instructions",
-            "parts": "Required tools or parts",
-            "cost": "Estimated repair cost",
-            "difficulty": "Easy/Medium/Hard",
-            "warning": "Safety or warranty warnings"
-        }}
-
-        Ensure proper JSON formatting and practical solutions.
+        Provide detailed troubleshooting steps.
+        Format response as JSON with fields:
+        - name: issue title
+        - type: Hardware/Software
+        - diagnosis: problem description
+        - solution: step-by-step fix
+        - parts: required parts
+        - cost: estimated cost
+        - warning: safety notes
         """
         
-        response = model.generate_content(prompt)
-        
-        if response.text:
-            try:
+        try:
+            response = model.generate_content(prompt, timeout=5)  # Add timeout
+            if response and response.text:
                 import json
-                import re
-                json_objects = re.findall(r'\{[^{}]*\}', response.text)
-                
-                results = []
-                for json_str in json_objects:
-                    try:
-                        result = json.loads(json_str)
-                        if all(key in result for key in ['name', 'type', 'diagnosis', 'solution']):
-                            results.append(result)
-                    except json.JSONDecodeError:
-                        continue
-                
-                if not results:
-                    return [{
-                        "name": "Troubleshooting Required",
-                        "type": "General Issue",
-                        "diagnosis": "Could not determine specific issue",
-                        "solution": "Please contact customer support",
-                        "parts": "Unknown",
-                        "cost": "To be determined",
-                        "difficulty": "N/A",
-                        "warning": "Professional diagnosis recommended"
-                    }]
-                
-                return results
-                
-            except Exception as e:
-                print(f"Error parsing issue results: {e}")
-                return [{"name": "Error", "type": "Error", "diagnosis": "Failed to parse results", "solution": str(e)}]
+                results = json.loads(response.text)
+                if isinstance(results, dict):
+                    return [results]
+        except Exception as api_error:
+            print(f"Gemini API error: {api_error}")
+            # Fall back to pre-defined response
+            return [issue_types[issue_type]]
+            
+        # Fall back to pre-defined response if parsing fails
+        return [issue_types[issue_type]]
+        
     except Exception as e:
-        print(f"Error generating issue results: {e}")
-        return [{"name": "Error", "type": "Error", "diagnosis": "Failed to generate results", "solution": str(e)}]
+        print(f"Error in generate_issue_results: {e}")
+        return [issue_types['general']]
 
 def extract_features_from_query(text: str) -> Dict[str, List[str]]:
     """Extract phone features from query text"""
