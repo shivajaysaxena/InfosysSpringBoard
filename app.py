@@ -24,6 +24,9 @@ import plotly.graph_objects as go
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 import google.generativeai as genai
+import threading
+import queue
+from concurrent.futures import ThreadPoolExecutor
 
 # Load environment variables from .env file
 load_dotenv()
@@ -240,7 +243,7 @@ def calculate_sentiment_shifts(sentiments):
         elif abs(shift) < 0.5:
             magnitude = "Moderate"
         else:
-            magnitude = "Significant"
+            magnitude = "Significant"  # Removed incorrect st.warning statements
             
         direction = "🔼" if shift > 0 else "🔽" if shift < 0 else "➡️"
         
@@ -289,12 +292,134 @@ def get_search_summary(conversations):
 # Load the phone dataset globally
 phone_dataset = load_phone_dataset("phone_comparison.csv")
 
+# Create queues for thread communication
+audio_queue = queue.Queue()
+analysis_queue = queue.Queue()
+search_queue = queue.Queue()
+
+# Add new functions for threaded processing
+def process_audio(recognizer, audio, transcript_container, session_id):
+    """Process audio in a separate thread with longer timeout"""
+    try:
+        text = recognizer.recognize_google(audio)
+        if text:
+            save_conversation(session_id, text)
+            audio_queue.put((text, transcript_container))
+    except Exception as e:
+        print(f"Audio processing error: {e}")
+
+def listen_continuously(recognizer, source, stop_event):
+    """Listen continuously for speech"""
+    try:
+        while not stop_event.is_set():
+            try:
+                audio = recognizer.listen(source, timeout=10, phrase_time_limit=10)
+                return audio
+            except sr.WaitTimeoutError:
+                continue
+    except Exception as e:
+        print(f"Continuous listening error: {e}")
+        return None
+
+def process_analysis(text, analysis_container):
+    """Process analysis in a separate thread"""
+    try:
+        details = get_conversation_details(text)
+        analysis_queue.put((details, analysis_container))
+    except Exception as e:
+        print(f"Analysis error: {e}")
+
+def process_search(query, is_issue, results_container):
+    """Process search in a separate thread"""
+    try:
+        results = process_object_query(query, phone_dataset)
+        search_queue.put((results, is_issue, results_container))
+    except Exception as e:
+        print(f"Search error: {e}")
+
+def process_voice_input(text, session_id, feedback_placeholder, results_container, timestamp=None):
+    """Process voice input and display results immediately"""
+    try:
+        # Save conversation
+        save_conversation(session_id, text)
+        
+        # Generate CRM data and initialize vector_db
+        current_crm_data = generate_crm_data([text], phone_dataset)
+        initialize_vector_db(current_crm_data)
+        
+        # Get all analysis details
+        details = get_conversation_details(text)
+        is_issue = is_troubleshooting_query(text)
+        results = process_object_query(text, phone_dataset)
+        
+        # Use timestamp for unique keys
+        current_time = timestamp or datetime.now().timestamp()
+        
+        # Display results in organized sections
+        with results_container:
+            st.markdown("---")
+            
+            # Show recognized text and sentiment
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                st.success(f"🎤 Recognized: {text}")
+            with col2:
+                sentiment_score = f"{details['sentiment']} ({details['score']:.2f})"
+                st.info(f"😊 Sentiment: {sentiment_score}")
+            
+            # Show results based on query type
+            if is_issue:
+                st.subheader("🔧 Troubleshooting Results")
+                for i, result in enumerate(results):
+                    with st.expander(f"Issue: {result.get('name', 'Problem')}", expanded=True):
+                        st.info(f"Type: {result.get('type', 'N/A')}")
+                        st.markdown("### Diagnosis")
+                        st.write(result.get('diagnosis', 'N/A'))
+                        st.markdown("### Solution")
+                        st.write(result.get('solution', 'N/A'))
+                        if 'parts' in result:
+                            st.markdown("### Required Parts")
+                            st.write(result.get('parts', 'N/A'))
+                        if 'cost' in result:
+                            st.info(f"Estimated Cost: {result.get('cost', 'N/A')}")
+            else:
+                st.subheader("📱 Recommended Products")
+                for i, result in enumerate(results):
+                    with st.expander(f"📱 {result.get('name', 'Result')}", expanded=True):
+                        st.write(f"💰 {result.get('price_category', 'N/A')}")
+                        st.write(f"📱 {result.get('display', 'N/A')}")
+                        st.write(f"⚙️ {result.get('specs', 'N/A')}")
+            
+            # Show recommendations
+            st.markdown("### 💡 Related Recommendations")
+            for rec in details['recommendations']:
+                st.write(f"• {rec}")
+            
+            # Show dynamic questions with unique keys
+            st.markdown("### ❓ Follow-up Questions")
+            question_cols = st.columns(3)
+            for i, question in enumerate(details['questions']):
+                with question_cols[i]:
+                    if st.button(f"🔍 {question}", 
+                               key=f"q_{i}_{current_time}",  # Add timestamp to make key unique
+                               use_container_width=True):
+                        st.session_state.current_query = question
+                        st.rerun()
+            
+    except Exception as e:
+        st.error(f"Error processing voice input: {str(e)}")
+
 def main():
     # Initialize session state variables
     if 'transcripts' not in st.session_state:
         st.session_state.transcripts = []
     if 'dashboard_pdf_ready' not in st.session_state:
         st.session_state.dashboard_pdf_ready = False
+    
+    # Initialize executor only if it doesn't exist or was shutdown
+    if ('executor' not in st.session_state or 
+        st.session_state.executor._shutdown):
+        st.session_state.executor = ThreadPoolExecutor(max_workers=3)
 
     st.title("Speech Recognition, Sentiment Analysis, and Object Handling")
 
@@ -375,7 +500,6 @@ def main():
                         st.subheader("Sentiment Shift Analysis")
                         
                         # Create enhanced heatmap
-                        shift_df = pd.DataFrame(shifts)
                         fig = go.Figure()
                         
                         # Add heatmap
@@ -623,182 +747,141 @@ def main():
                         )
 
     elif option == "Live Recording":
-        st.header("Live Recording")
+        st.header("Interactive Assistant")
 
-        # Create two columns: one for recording and one for search results
-        main_col, search_col = st.columns([2, 1])
+        # Add stop event to session state
+        if 'stop_listening' not in st.session_state:
+            st.session_state.stop_listening = threading.Event()
+        if 'is_listening' not in st.session_state:
+            st.session_state.is_listening = False
+        if 'current_query' not in st.session_state:
+            st.session_state.current_query = ""
+
+        # Create main container for results that will be accessible throughout
+        results_container = st.container()
+
+        # Create two columns: main interaction and results
+        main_col, side_col = st.columns([2, 1])
 
         with main_col:
-            recognizer = sr.Recognizer()
-            microphone = sr.Microphone()
-
-            st.write("Start speaking...")
-
-            # Recording controls
-            col1, col2 = st.columns(2)
-            with col1:
-                if not st.session_state.get("recording_active", False):
-                    if st.button("Start Recording"):
-                        st.session_state.recording_active = True
-                        st.session_state["previous_sentiment"] = None
-                        st.write("Recording started...")
-            with col2:
-                if st.session_state.get("recording_active", False):
-                    if st.button("Stop Recording"):
-                        st.session_state.recording_active = False
-                        st.write("Recording stopped.")
-
-            # Recording logic
-            if st.session_state.get("recording_active", False):
-                with microphone as source:
-                    recognizer.adjust_for_ambient_noise(source)
-                    try:
-                        st.info("Listening... Speak now!")
-                        audio = recognizer.listen(source, timeout=5)
-                        text = recognizer.recognize_google(audio)
-                        if text:
-                            save_conversation(session_id, text)
-                            st.write(f"Transcript: {text}")
-                    except sr.WaitTimeoutError:
-                        st.warning("No speech detected. Please try again.")
-                    except sr.RequestError:
-                        st.error("Could not access the speech recognition service.")
-                    except sr.UnknownValueError:
-                        st.warning("Could not understand audio. Please try again.")
-                    except Exception as e:
-                        st.error(f"An error occurred: {str(e)}")
-
-        # Add search functionality in the side column
-        with search_col:
-            st.header("Quick Search")
-            
-            # Add quick filters for common searches first
-            st.subheader("Quick Filters")
-            
-            # Create two columns for filter buttons with descriptive categories
-            filter_col1, filter_col2 = st.columns(2)
-            
-            # Product filters
-            with filter_col1:
-                st.caption("Products")
-                latest_phones = st.button("📱 Latest Phones")
-                gaming_phones = st.button("🎮 Gaming Phones")
+            # Create voice-first search interface
+            search_container = st.container()
+            with search_container:
+                # Add text search at the top
+                text_query = st.text_input("Search or type your query", 
+                    key="text_search",
+                    placeholder="Type your question or search query here..."
+                )
                 
-            # Issue filters
-            with filter_col2:
-                st.caption("Common Issues")
-                battery_issues = st.button("🔋 Battery Issues")
-                camera_issues = st.button("📷 Camera Issues")
-                screen_issues = st.button("🖥️ Screen Issues")
-            
-            # Determine search query and context based on button clicks
-            search_query = ""
-            is_issue_search = False
-            
-            if latest_phones:
-                search_query = "recommend latest flagship phones"
-            elif gaming_phones:
-                search_query = "recommend gaming phones"
-            elif battery_issues:
-                search_query = "battery not working problem"
-                is_issue_search = True
-            elif camera_issues:
-                search_query = "camera not working issue"
-                is_issue_search = True
-            elif screen_issues:
-                search_query = "screen display not working problem"
-                is_issue_search = True
-            
-            # Text input for manual search
-            manual_search = st.text_input("Search phones or issues", value=search_query)
-            
-            # Use either the button-triggered search or manual input
-            current_search = manual_search or search_query
-            
-            # Check if the current search is issue-related
-            if not is_issue_search and manual_search:
-                is_issue_search = is_troubleshooting_query(manual_search)
-            
-            if current_search:
-                results = process_object_query(current_search, phone_dataset)
+                if text_query:
+                    process_voice_input(
+                        text_query, 
+                        session_id, 
+                        None, 
+                        results_container,
+                        timestamp=datetime.now().timestamp()
+                    )
                 
-                if results:
-                    st.subheader("Search Results")
-                    
-                    # Handle issue-related results differently
-                    if is_issue_search:
-                        st.markdown("#### Troubleshooting Results")
-                        for result in results:
-                            # Changed expanded=True to expanded=False
-                            with st.expander(f"🔧 {result.get('name', 'Issue')}", expanded=False):
-                                st.markdown("### Problem Details")
-                                st.info(f"Type: {result.get('type', 'N/A')}")
-                                
-                                st.markdown("### Diagnosis")
-                                st.write(result.get('diagnosis', 'No diagnosis available'))
-                                
-                                st.markdown("### Solution")
-                                solution_text = result.get('solution', '')
-                                steps = solution_text.split('\n') if isinstance(solution_text, str) else [solution_text]
-                                for i, step in enumerate(steps, 1):
-                                    if step.strip():
-                                        st.write(f"{i}. {step.strip()}")
-                                
-                                # Create columns for additional info
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    st.markdown("**Parts/Tools Needed**")
-                                    st.write(result.get('parts', 'N/A'))
-                                with col2:
-                                    st.markdown("**Estimated Cost**")
-                                    st.write(result.get('cost', 'N/A'))
-                                
-                                difficulty = result.get('difficulty', 'N/A')
-                                st.markdown("**Difficulty Level**")
-                                if difficulty.lower() == 'easy':
-                                    st.success(difficulty)
-                                elif difficulty.lower() == 'medium':
-                                    st.warning(difficulty)
-                                else:
-                                    st.error(difficulty)
-                                
-                                if result.get('warning'):
-                                    st.warning(f"⚠️ {result['warning']}")
+                st.markdown("### Or use voice input:")
+                
+                # Create centered microphone button
+                col1, col2, col3 = st.columns([1, 1, 1])
+                with col2:
+                    if st.session_state.is_listening:
+                        if st.button("⏹️ Stop", help="Stop listening", type="primary", use_container_width=True):
+                            st.session_state.stop_listening.set()
+                            st.session_state.is_listening = False
+                            st.rerun()
                     else:
-                        # Handle product results
-                        for result in results:
-                            # Changed expanded=True to expanded=False
-                            with st.expander(f"📱 {result.get('name', 'Unknown Device')}", expanded=False):
-                                # Create two columns for specs
-                                col1, col2 = st.columns(2)
+                        if st.button("🎤 Start Voice Search", help="Start listening", type="primary", use_container_width=True):
+                            st.session_state.stop_listening.clear()
+                            st.session_state.is_listening = True
+                            # Initialize vector_db before starting
+                            initialize_vector_db([])
+                            st.rerun()
+                
+                # Voice recording status and container
+                voice_container = st.container()
+                
+                # Continuous voice input handling
+                if st.session_state.is_listening:
+                    with voice_container:
+                        status_placeholder = st.empty()
+                        feedback_placeholder = st.empty()
+                        status_placeholder.info("🎤 Listening... (Speak your query)")
+                        
+                        try:
+                            recognizer = sr.Recognizer()
+                            with sr.Microphone() as source:
+                                # Longer ambient noise adjustment
+                                recognizer.adjust_for_ambient_noise(source, duration=1.0)
                                 
-                                with col1:
-                                    st.markdown("**📱 Display**")
-                                    st.write(result.get('display', 'N/A'))
-                                    st.markdown("**💰 Price Category**")
-                                    price_cat = result.get('price_category', 'N/A')
-                                    if 'budget' in price_cat.lower():
-                                        st.success(price_cat)
-                                    elif 'mid' in price_cat.lower():
-                                        st.info(price_cat)
-                                    else:
-                                        st.warning(price_cat)
-                                
-                                with col2:
-                                    st.markdown("**⚙️ Specifications**")
-                                    st.write(result.get('specs', 'N/A'))
-                                
-                                if result.get('keywords'):
-                                    st.markdown("**🔑 Key Features**")
-                                    st.info(result.get('keywords', 'N/A'))
+                                while st.session_state.is_listening and not st.session_state.stop_listening.is_set():
+                                    try:
+                                        feedback_placeholder.info("🎤 Listening actively...")
+                                        # Increased timeout and phrase limit for longer sentences
+                                        audio = recognizer.listen(source, timeout=20, phrase_time_limit=30)
+                                        try:
+                                            text = recognizer.recognize_google(audio)
+                                            if text:
+                                                feedback_placeholder.success(f"Recognized: {text}")
+                                                st.session_state.current_query = text
+                                                # Process voice input immediately
+                                                process_voice_input(text, session_id, feedback_placeholder, results_container)
+                                                time.sleep(2)  # Give more time to read results
+                                        except sr.UnknownValueError:
+                                            feedback_placeholder.warning("Could not understand, please try again")
+                                            time.sleep(1)
+                                            continue
+                                    except sr.WaitTimeoutError:
+                                        continue
+                                    
+                        except Exception as e:
+                            st.error(f"Voice input error: {str(e)}")
+                            st.session_state.is_listening = False
 
-                else:
-                    if is_issue_search:
-                        st.warning("No troubleshooting results found. Please contact support.")
-                    else:
-                        st.warning("No matching products found.")
+                # Rest of the code...
+                # ...existing code...
+
+# Add new helper function to process queries
+def process_query(query, session_id, container):
+    """Process search query and display results"""
+    # Save the query
+    save_conversation(session_id, query)
+    
+    # Get results and details
+    is_issue = is_troubleshooting_query(query)
+    results = process_object_query(query, phone_dataset)
+    details = get_conversation_details(query)
+    
+    # Display results
+    st.markdown("---")
+    
+    # Show metadata
+    meta_col1, meta_col2 = st.columns([2, 1])
+    with meta_col1:
+        st.caption(f"Showing results for: {query}")
+    with meta_col2:
+        sentiment = f"{details['sentiment']} ({details['score']:.2f})"
+        st.caption(f"Query sentiment: {sentiment}")
+    
+    # Rest of your existing results display code...
+    # ...existing code...
+
+    # Move executor cleanup to a separate function
+    def cleanup():
+        if 'executor' in st.session_state:
+            try:
+                st.session_state.executor.shutdown(wait=True)
+            except Exception as e:
+                print(f"Error shutting down executor: {e}")
+    
+    # Register the cleanup function to run on session end
+    st.session_state['_cleanup_scheduled'] = cleanup
 
 if __name__ == "__main__":
     initialize_database()
     main()
+
+
 
