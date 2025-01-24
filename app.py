@@ -437,7 +437,7 @@ def main():
         st.session_state.executor._shutdown):
         st.session_state.executor = ThreadPoolExecutor(max_workers=3)
 
-    st.title("Speech Recognition, Sentiment Analysis, and Object Handling")
+    st.title("Real-Time AI Sales Call Assistant for Enhanced Conversation Strategies")
 
     # Initialize session
     session_id = st.session_state.get("session_id", str(datetime.now().timestamp()))
