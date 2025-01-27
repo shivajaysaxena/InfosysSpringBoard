@@ -71,4 +71,65 @@ Follow these steps to set up the project:
 ## 🖥️ Usage
 
 Launch the application:
+```bash
+streamlit run app.py
+```
 
+## 🎯 Key Features:
+1. **🎤 Live Voice Assistant**
+Click "Start Voice Search"
+Speak your query clearly
+View real-time analysis
+Use quick filters for common queries
+
+2. **📊 Analytics Dashboard**
+Track conversation metrics
+Monitor sentiment trends
+Analyze product recommendations
+Generate PDF reports
+
+## 📁 Project Structure
+```
+ai-sales-assistant/
+├── app.py                # Main application
+├── assistant.py          # Core AI functionality
+├── requirements.txt      # Dependencies
+├── data/
+│   ├── phone_comparison.csv    # Product database
+│   └── spare_parts.csv         # Spare parts data
+└── README.md            # Documentation
+```
+
+## 🧰 Core Dependencies
+
+- Streamlit: Interactive UI
+- Google Gemini AI: Natural language processing
+- SpeechRecognition: Voice input processing
+- Pandas: Data management
+- FAISS: Vector search
+- Plotly: Data visualization
+- FPDF: Report generation
+
+## 🤝 Contributing
+1. **Fork the repository**
+2. **Create feature branch:**
+```bash
+git checkout -b feature/YourFeature
+```
+3. **Commit changes:**
+```bash
+git commit -m "Add: feature description"
+```
+4. **Push to branch:**
+```bash
+git push origin feature/YourFeature
+```
+5. **Open Pull Request**
+
+## 📝 License
+This project is licensed under the MIT License.
+
+## 📧 Contact
+For inquiries or feedback, please contact Shivajay Saxena
+
+<div align="center"> <img src="https://img.icons8.com/color/48/000000/microphone.png" alt="Voice Icon" /> <img src="https://img.icons8.com/color/48/000000/analytics.png" alt="Analytics Icon" /> <img src="https://img.icons8.com/color/48/000000/mobile-payment.png" alt="Sales Icon" /> </div>
