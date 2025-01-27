@@ -1,112 +1,74 @@
-# Real-Time AI Sales Call Assistant
+# 🎙️ Real-Time AI Sales Call Assistant
 
-A Streamlit-based conversational assistant powered by Google's Gemini AI for real-time sales call analysis, mobile phone recommendations, and customer interaction insights.
+Welcome to the **Real-Time AI Sales Call Assistant** project! This application provides intelligent real-time analysis of sales conversations, mobile phone recommendations, and customer interaction insights powered by Google's Gemini AI. Built with Streamlit, this tool offers a seamless and interactive experience for sales professionals.
 
 ## 🚀 Features
 
-### 🎙️ Live Voice Interaction
-- Real-time speech-to-text conversion
-- Sentiment analysis of conversations
-- Dynamic question generation
-- Context-aware product recommendations
+- **🎤 Live Voice Recognition:** Real-time speech-to-text conversion with instant feedback
+- **🧠 Sentiment Analysis:** Dynamic emotion tracking and conversation mood analysis
+- **💡 Smart Recommendations:** Context-aware product and spare parts suggestions
+- **📊 Analytics Dashboard:** Comprehensive visualization of conversation metrics
+- **📝 Auto Documentation:** Automatic conversation logging and report generation
 
-### 🤖 Intelligent Product Assistance
-- Natural language product search
-- Smart troubleshooting assistance
-- Spare parts recommendations
-- Brand and feature-based filtering
+## 🛠️ Installation
 
-### 📊 Analytics Dashboard
-- Real-time sentiment tracking
-- Issue frequency analysis
-- Product recommendation trends
-- Interactive conversation history
-- Detailed call reports
-- PDF report generation
+Follow these steps to set up the project:
 
-### 💡 Smart Recommendations
-- Dataset-validated product suggestions
-- Brand-aware recommendations
-- Spare parts matching for repairs
-- Context-based filtering
+1. **🔀 Clone the Repository:**
+   ```bash
+   git clone <repository-url>
+   cd <project-directory>
+   ```
 
-## 🛠️ Technology Stack
+2. **📥 System Requirements:**
 
-- Python 3.9+
-- Streamlit
-- Google Gemini AI
-- Pandas for data management
-- SQLite for conversation storage
-- FAISS for vector search
-- Plotly for data visualization
-- FPDF for report generation
+   > **⚠️ Python Compatibility**: Requires Python 3.9+ (3.10 recommended)
 
-## 📦 Dataset Details
+   **Version Support:**
+   - ✅ Python 3.9-3.11: Fully compatible
+   - ✅ Python 3.10: Recommended version
+   - ❌ Python 3.12+: Not supported by dependencies
 
-### 📱 Phone Dataset (phone_comparison.csv)
-- Comprehensive phone specifications
-- Latest phone models
-- Detailed feature information
-- Brand and price categories
+   **Check Python Version:**
+   ```bash
+   python --version  # Windows
+   python3 --version  # macOS/Linux
+   ```
 
-### 🔧 Spare Parts Dataset (spare_parts.csv)
-- Common replacement parts
-- Compatibility information
-- Pricing and availability
-- Issue-specific categorization
+   **Create Virtual Environment:**
+   ```bash
+   python -m venv venv
+   
+   # Windows
+   venv\Scripts\activate
+   
+   # macOS/Linux
+   source venv/bin/activate
+   ```
 
-## ⚙️ Installation
+3. **📦 Install Dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-1. Clone the Repository:
-```bash
-git clone <repository-url>
-cd <project-directory>
-```
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-3. Set up your API key:
-```bash
-export API_KEY=your_google_gemini_api_key
-```
-4. Run the application:
-```bash
-streamlit run app.py
-```
+4. **🔑 Configure Google Gemini API:**
+   
+   a. Get API key from Google AI Studio
+   b. Set environment variable:
+   
+   **Windows:**
+   ```bash
+   setx API_KEY "your_gemini_api_key"
+   ```
+   
+   **macOS/Linux:**
+   ```bash
+   echo "export API_KEY='your_gemini_api_key'" >> ~/.zshrc
+   # OR
+   echo "export API_KEY='your_gemini_api_key'" >> ~/.bashrc
+   ```
 
-# Usage Guide
+## 🖥️ Usage
 
-## Live Recording
-1. Select "Live Recording" from the sidebar.
-2. Click "Start Recording" to begin.
-3. Speak your query clearly.
-4. View real-time analysis and recommendations.
-5. Click "Stop Recording" when finished.
-
-## Search Query
-1. Select "Search Query" from the sidebar.
-2. Type your query in the search box.
-3. View detailed product or spare part information.
-4. Explore recommendations and specifications.
-
-## Dashboard
-- View conversation analytics.
-- Track sentiment trends.
-- Monitor common issues.
-- Download conversation reports.
-
-## Development
-
-### Adding New Features
-1. Update datasets in CSV files.
-2. Extend `assistant.py` with new functions.
-3. Add UI components in `app.py`.
-4. Update documentation.
-
-### Debugging
-1. Check console for detailed logs.
-2. Verify dataset loading messages.
-3. Monitor API responses.
-4. Review sentiment analysis results.
+Launch the application:
 
