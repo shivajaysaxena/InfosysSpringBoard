@@ -1,22 +1,22 @@
-# AI-Powered Mobile Phone Assistant
+# Real-Time AI Sales Call Assistant
 
-A Streamlit-based conversational assistant that provides intelligent assistance for mobile phone queries, troubleshooting, and recommendations powered by Google's Gemini AI.
+A Streamlit-based conversational assistant powered by Google's Gemini AI for real-time sales call analysis, mobile phone recommendations, and customer interaction insights.
 
-## Features
+## 🚀 Features
 
-### 1. Live Voice Interaction
+### 🎙️ Live Voice Interaction
 - Real-time speech-to-text conversion
 - Sentiment analysis of conversations
 - Dynamic question generation
 - Context-aware product recommendations
 
-### 2. Intelligent Search & Support
+### 🤖 Intelligent Product Assistance
 - Natural language product search
 - Smart troubleshooting assistance
 - Spare parts recommendations
-- Brand and category-based filtering
+- Brand and feature-based filtering
 
-### 3. Analytics Dashboard
+### 📊 Analytics Dashboard
 - Real-time sentiment tracking
 - Issue frequency analysis
 - Product recommendation trends
@@ -24,40 +24,40 @@ A Streamlit-based conversational assistant that provides intelligent assistance 
 - Detailed call reports
 - PDF report generation
 
-### 4. Smart Recommendations
+### 💡 Smart Recommendations
 - Dataset-validated product suggestions
 - Brand-aware recommendations
 - Spare parts matching for repairs
 - Context-based filtering
 
-## Technology Stack
+## 🛠️ Technology Stack
 
 - Python 3.9+
 - Streamlit
 - Google Gemini AI
 - Pandas for data management
 - SQLite for conversation storage
-- SentenceTransformers for text analysis
+- FAISS for vector search
 - Plotly for data visualization
 - FPDF for report generation
 
-## Dataset Details
+## 📦 Dataset Details
 
-### Phone Dataset (phone_comparison.csv)
+### 📱 Phone Dataset (phone_comparison.csv)
 - Comprehensive phone specifications
-- 45+ latest phone models
+- Latest phone models
 - Detailed feature information
-- Categorization keywords
+- Brand and price categories
 
-### Spare Parts Dataset (spare_parts.csv)
+### 🔧 Spare Parts Dataset (spare_parts.csv)
 - Common replacement parts
 - Compatibility information
 - Pricing and availability
-- Issue-specific keywords
+- Issue-specific categorization
 
-## Setup
+## ⚙️ Installation
 
-1. Clone the repository:
+1. Clone the Repository:
 ```bash
 git clone <repository-url>
 cd <project-directory>
