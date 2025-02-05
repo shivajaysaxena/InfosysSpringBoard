@@ -127,7 +127,10 @@ git push origin feature/YourFeature
 5. **Open Pull Request**
 
 ## 📝 License
-This project is licensed under the MIT License.
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## 📧 Contact
 For inquiries or feedback, please contact Shivajay Saxena
